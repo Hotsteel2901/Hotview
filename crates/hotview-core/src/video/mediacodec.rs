@@ -218,6 +218,7 @@ pub struct MediaCodecDecoder {
     color: YuvInfo,
     color_format: i32,
     geometry: Geometry,
+    first_frame_logged: bool,
     input_done: bool,
     output_done: bool,
     last_pts_us: i64,
@@ -327,6 +328,16 @@ impl MediaCodecDecoder {
             return Err(HotviewError::Video("video track reports no size".into()));
         }
 
+        log::info!(
+            "video decoder {mime}: {width}x{height}, color {color_format:#x}, stride {}, slice {}, crop ({}, {}) {}x{}",
+            geometry.stride,
+            geometry.slice_height,
+            geometry.left,
+            geometry.top,
+            geometry.width,
+            geometry.height,
+        );
+
         Ok(Self {
             extractor,
             codec,
@@ -344,6 +355,7 @@ impl MediaCodecDecoder {
             color,
             color_format,
             geometry,
+            first_frame_logged: false,
             input_done: false,
             output_done: false,
             last_pts_us: 0,
@@ -517,6 +529,15 @@ impl MediaCodecDecoder {
             } else {
                 Some(self.read_output_buffer(index, &buffer_info, pts_us)?)
             };
+            if let Some(frame) = &frame {
+                if !self.first_frame_logged {
+                    self.first_frame_logged = true;
+                    let (frame_width, frame_height) = frame.dimensions();
+                    log::info!(
+                        "first video frame decoded: {frame_width}x{frame_height} at {pts_us}us"
+                    );
+                }
+            }
             AMediaCodec_releaseOutputBuffer(self.codec.0, index, false);
             return Ok(Some(match frame {
                 Some(frame) => DecodeOutcome::Frame(frame),

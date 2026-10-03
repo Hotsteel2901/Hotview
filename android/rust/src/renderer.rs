@@ -99,15 +99,38 @@ struct PlaybackSession {
     last_pts_us: i64,
 }
 
+/// Open the audio device on a worker thread: a broken audio HAL can make
+/// `openStream` hang forever, and the render thread must not be blocked by it.
+fn open_audio_output(sample_rate: u32, channels: u16) -> Option<AaudioOutput> {
+    let (tx, rx) = channel();
+    let spawned = std::thread::Builder::new()
+        .name("hotview-audio-open".into())
+        .spawn(move || {
+            let _ = tx.send(AaudioOutput::new(sample_rate, channels));
+        });
+    if spawned.is_err() {
+        return None;
+    }
+    match rx.recv_timeout(Duration::from_millis(700)) {
+        Ok(Ok(output)) => Some(output),
+        Ok(Err(err)) => {
+            log::warn!("audio output unavailable: {err}");
+            None
+        }
+        Err(_) => {
+            log::warn!("audio output did not open within 700 ms; playing without sound");
+            None
+        }
+    }
+}
+
 impl PlaybackSession {
     fn new(video: Box<dyn VideoDecoder>, audio: Option<Box<dyn AudioDecoder>>) -> Self {
         // Opening the output can fail (no audio device / busy); the video then
         // falls back to the wall clock.
-        let output = audio.as_ref().and_then(|decoder| {
-            AaudioOutput::new(decoder.sample_rate(), decoder.channels())
-                .map_err(|err| log::warn!("audio output unavailable: {err}"))
-                .ok()
-        });
+        let output = audio
+            .as_ref()
+            .and_then(|decoder| open_audio_output(decoder.sample_rate(), decoder.channels()));
         if let Some(output) = &output {
             log::info!(
                 "audio output: {} Hz, {} ch (track: {} Hz, {} ch)",

@@ -431,18 +431,22 @@ private fun ViewerPage(
     var failure by remember(item.id) { mutableStateOf<String?>(null) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
     var zoomTarget by remember(item.id) { mutableFloatStateOf(1f) }
+    var smoothZoom by remember(item.id) { mutableStateOf(false) }
     var pan by remember(item.id) { mutableStateOf(Offset.Zero) }
-    val zoomedIn by remember { derivedStateOf { zoomTarget > 1.01f } }
+    val zoomedIn by remember(item.id) { derivedStateOf { zoom > 1.01f } }
 
-    // Smoothly chase the gesture target: pinch follows the fingers, double tap
-    // animates with an expressive spring.
-    LaunchedEffect(zoomTarget) {
-        androidx.compose.animation.core.animate(
-            initialValue = zoom,
-            targetValue = zoomTarget,
-            animationSpec = spring(dampingRatio = 0.78f, stiffness = 420f),
-        ) { value, _ ->
-            zoom = value
+    // Pinching sets `zoom` directly so the picture tracks the fingers; only the
+    // double-tap animates with an expressive spring.
+    LaunchedEffect(zoomTarget, smoothZoom) {
+        if (smoothZoom) {
+            androidx.compose.animation.core.animate(
+                initialValue = zoom,
+                targetValue = zoomTarget,
+                animationSpec = spring(dampingRatio = 0.78f, stiffness = 420f),
+            ) { value, _ ->
+                zoom = value
+            }
+            smoothZoom = false
         }
     }
 
@@ -520,10 +524,11 @@ private fun ViewerPage(
                         onDoubleTap = {
                             pan = Offset.Zero
                             zoomTarget = if (zoomedIn) 1f else 2.5f
+                            smoothZoom = true
                         },
                     )
                 }
-                .pointerInput(item.id, zoomedIn) {
+                .pointerInput(item.id) {
                     awaitEachGesture {
                         var multiTouch = false
                         awaitFirstDown(requireUnconsumed = false)
@@ -536,6 +541,9 @@ private fun ViewerPage(
                             if (pressed >= 2) {
                                 multiTouch = true
                                 zoomTarget = (zoomTarget * zoomChange).coerceIn(1f, 8f)
+                                // Track the fingers live instead of animating to
+                                // the target only after they are lifted.
+                                zoom = zoomTarget
                                 pan += panChange
                                 event.changes.forEach { it.consume() }
                             } else if (multiTouch || zoomedIn) {
@@ -544,6 +552,9 @@ private fun ViewerPage(
                                     if (it.positionChanged()) it.consume()
                                 }
                             }
+                        }
+                        if (zoom <= 1.001f) {
+                            pan = Offset.Zero
                         }
                     }
                 },

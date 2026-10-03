@@ -25,6 +25,7 @@ class MediaSurfaceView(context: Context) :
 
     private var handle = 0L
     private var pending: (() -> Unit)? = null
+    private var desiredPlaying = false
 
     /** Duration in ms, fired when a video has been prepared. */
     var onPrepared: ((Long) -> Unit)? = null
@@ -64,6 +65,10 @@ class MediaSurfaceView(context: Context) :
             handle = newHandle
         }
         if (handle != 0L) {
+            // The viewer can request playback before the surface exists.
+            if (desiredPlaying) {
+                runCatching { NativeBridge.setPlaying(handle, true) }
+            }
             pending?.invoke()
         }
         pending = null
@@ -166,11 +171,13 @@ class MediaSurfaceView(context: Context) :
     // ------------------------------------------------------------- controls
 
     fun play() {
+        desiredPlaying = true
         val current = handle
         if (current != 0L) runCatching { NativeBridge.setPlaying(current, true) }
     }
 
     fun pause() {
+        desiredPlaying = false
         val current = handle
         if (current != 0L) runCatching { NativeBridge.setPlaying(current, false) }
     }

@@ -57,9 +57,15 @@ object NativeBridge {
 
         try {
             val logFile = runCatching {
-                val dir = context.getExternalFilesDir(null) ?: context.filesDir
+                // Android/media/<pkg> is readable by every app (and by our
+                // container), while Android/data/<pkg> is more restricted.
+                val dir = context.getExternalMediaDirs()?.firstOrNull()
+                    ?: context.getExternalFilesDir(null)
+                    ?: context.filesDir
                 val file = java.io.File(dir, "hotview.log")
+                file.parentFile?.mkdirs()
                 if (file.length() > 512 * 1024) file.delete()
+                android.util.Log.i("hotview", "log file: ${file.absolutePath}")
                 file.absolutePath
             }.getOrNull()
             initLogger(logFile)
