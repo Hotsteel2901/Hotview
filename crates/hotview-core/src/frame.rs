@@ -78,6 +78,142 @@ impl RgbaFrame {
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
+
+    /// Rotate 90° clockwise.
+    pub fn rotate_90_cw(&self) -> Self {
+        let src_w = self.width as usize;
+        let src_h = self.height as usize;
+        if src_w == 0 || src_h == 0 || self.data.len() < src_w * src_h * 4 {
+            return self.clone();
+        }
+        let dst_w = src_h;
+        let dst_h = src_w;
+        let mut out = vec![0u8; dst_w * dst_h * 4];
+        out.par_chunks_mut(dst_w * 4)
+            .enumerate()
+            .for_each(|(dst_y, dst_row)| {
+                let src_x = dst_y;
+                for dst_x in 0..dst_w {
+                    let src_y = src_h - 1 - dst_x;
+                    let src_idx = (src_y * src_w + src_x) * 4;
+                    let dst_idx = dst_x * 4;
+                    dst_row[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&self.data[src_idx..src_idx + 4]);
+                }
+            });
+        Self {
+            width: dst_w as u32,
+            height: dst_h as u32,
+            data: out,
+            pts_us: self.pts_us,
+        }
+    }
+
+    /// Rotate 90° counter-clockwise.
+    pub fn rotate_90_ccw(&self) -> Self {
+        let src_w = self.width as usize;
+        let src_h = self.height as usize;
+        if src_w == 0 || src_h == 0 || self.data.len() < src_w * src_h * 4 {
+            return self.clone();
+        }
+        let dst_w = src_h;
+        let dst_h = src_w;
+        let mut out = vec![0u8; dst_w * dst_h * 4];
+        out.par_chunks_mut(dst_w * 4)
+            .enumerate()
+            .for_each(|(dst_y, dst_row)| {
+                let src_x = src_w - 1 - dst_y;
+                for dst_x in 0..dst_w {
+                    let src_y = dst_x;
+                    let src_idx = (src_y * src_w + src_x) * 4;
+                    let dst_idx = dst_x * 4;
+                    dst_row[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&self.data[src_idx..src_idx + 4]);
+                }
+            });
+        Self {
+            width: dst_w as u32,
+            height: dst_h as u32,
+            data: out,
+            pts_us: self.pts_us,
+        }
+    }
+
+    /// Rotate 180°.
+    pub fn rotate_180(&self) -> Self {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        if w == 0 || h == 0 || self.data.len() < w * h * 4 {
+            return self.clone();
+        }
+        let mut out = vec![0u8; w * h * 4];
+        out.par_chunks_mut(w * 4)
+            .enumerate()
+            .for_each(|(dst_y, dst_row)| {
+                let src_y = h - 1 - dst_y;
+                let src_row = &self.data[src_y * w * 4..(src_y + 1) * w * 4];
+                for dst_x in 0..w {
+                    let src_x = w - 1 - dst_x;
+                    dst_row[dst_x * 4..dst_x * 4 + 4]
+                        .copy_from_slice(&src_row[src_x * 4..src_x * 4 + 4]);
+                }
+            });
+        Self {
+            width: self.width,
+            height: self.height,
+            data: out,
+            pts_us: self.pts_us,
+        }
+    }
+
+    /// Mirror horizontally (left-to-right).
+    pub fn flip_horizontal(&self) -> Self {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        if w == 0 || h == 0 || self.data.len() < w * h * 4 {
+            return self.clone();
+        }
+        let mut out = vec![0u8; w * h * 4];
+        out.par_chunks_mut(w * 4)
+            .enumerate()
+            .for_each(|(y, dst_row)| {
+                let src_row = &self.data[y * w * 4..(y + 1) * w * 4];
+                for dst_x in 0..w {
+                    let src_x = w - 1 - dst_x;
+                    dst_row[dst_x * 4..dst_x * 4 + 4]
+                        .copy_from_slice(&src_row[src_x * 4..src_x * 4 + 4]);
+                }
+            });
+        Self {
+            width: self.width,
+            height: self.height,
+            data: out,
+            pts_us: self.pts_us,
+        }
+    }
+
+    /// Mirror vertically (top-to-bottom).
+    pub fn flip_vertical(&self) -> Self {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        if w == 0 || h == 0 || self.data.len() < w * h * 4 {
+            return self.clone();
+        }
+        let mut out = vec![0u8; w * h * 4];
+        out.par_chunks_mut(w * 4)
+            .enumerate()
+            .for_each(|(dst_y, dst_row)| {
+                let src_y = h - 1 - dst_y;
+                let src_row = &self.data[src_y * w * 4..(src_y + 1) * w * 4];
+                dst_row.copy_from_slice(src_row);
+            });
+        Self {
+            width: self.width,
+            height: self.height,
+            data: out,
+            pts_us: self.pts_us,
+        }
+    }
 }
 
 /// A single colour plane.
