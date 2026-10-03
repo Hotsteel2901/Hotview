@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
   # Also callable from release.yml (tag + GitHub Release).
   workflow_call:
+  push:
+    branches:
+      - "arena/**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,7 +35,13 @@ jobs:
           key: linux-x86_64
 
       - name: Build
-        run: cargo build --release -p hotview-desktop
+        run: |
+          if ! cargo build --release -p hotview-desktop --color=never --message-format=short 2>&1 | tee build.log; then
+            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+              echo "::error title=Compiler Error::$line"
+            done
+            exit 101
+          fi
 
       - name: Package
         run: |
@@ -73,7 +82,13 @@ jobs:
           key: macos-${{ matrix.arch }}
 
       - name: Build
-        run: cargo build --release -p hotview-desktop
+        run: |
+          if ! cargo build --release -p hotview-desktop --color=never --message-format=short 2>&1 | tee build.log; then
+            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+              echo "::error title=Compiler Error::$line"
+            done
+            exit 101
+          fi
 
       - name: Bundle FFmpeg dylibs
         run: |
@@ -128,7 +143,12 @@ jobs:
           PKG_CONFIG_PATH: C:\msys64\mingw64\lib\pkgconfig
         run: |
           export PATH="/c/msys64/mingw64/bin:$PATH"
-          cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu
+          if ! cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu --color=never --message-format=short 2>&1 | tee build.log; then
+            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+              echo "::error title=Compiler Error::$line"
+            done
+            exit 101
+          fi
 
       - name: Package
         run: |
