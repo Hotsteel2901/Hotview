@@ -109,14 +109,14 @@ jobs:
 
       - name: Build
         env:
-          PATH: C:\msys64\mingw64\bin;${{ env.PATH }}
           PKG_CONFIG_PATH: C:\msys64\mingw64\lib\pkgconfig
-        run: cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu
+        run: |
+          export PATH="/c/msys64/mingw64/bin:$PATH"
+          cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu
 
       - name: Package
-        env:
-          PATH: C:\msys64\mingw64\bin;${{ env.PATH }}
         run: |
+          export PATH="/c/msys64/mingw64/bin:$PATH"
           mkdir -p dist
           cp target/x86_64-pc-windows-gnu/release/hotview.exe dist/
           cp README.md LICENSE dist/
