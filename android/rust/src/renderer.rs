@@ -102,8 +102,10 @@ struct PlaybackSession {
     audio_pending: Vec<f32>,
     /// `(decoded, displayed, dropped)` frame counters.
     stats: (u64, u64, u64),
-    /// `(when, decoded, displayed, dropped)` of the last stats log line.
-    stats_last: Option<(Instant, u64, u64, u64)>,
+    /// Render cost since the last stats log: `(total µs, renders)`.
+    render_stats: (u64, u64),
+    /// `(when, decoded, displayed, dropped, position_us)` of the last stats log.
+    stats_last: Option<(Instant, u64, u64, u64, i64)>,
     last_pts_us: i64,
 }
 
@@ -165,6 +167,7 @@ impl PlaybackSession {
             audio_base: None,
             audio_pending: Vec::new(),
             stats: (0, 0, 0),
+            render_stats: (0, 0),
             stats_last: None,
             last_pts_us: 0,
         }
@@ -198,7 +201,14 @@ impl PlaybackSession {
             })
             .sum();
         let mut attempts = 0;
+        let started = Instant::now();
         while queued < MAX_QUEUED_PIXELS && attempts < 8 {
+            // Software decoders (dav1d AV1, ...) can take tens of ms per
+            // frame; never block the pump longer than a few ms so audio stays
+            // fed and displayed frames stay on time.
+            if attempts > 0 && started.elapsed() >= Duration::from_millis(6) {
+                break;
+            }
             attempts += 1;
             match self.video.next_frame() {
                 Ok(DecodeOutcome::Frame(frame)) => {
@@ -254,7 +264,12 @@ impl PlaybackSession {
         // being dropped (dropping mid-chunk is what made the audio crackle).
         let target = output.free_samples();
         let mut decoded = 0usize;
+        let started = Instant::now();
         while decoded < target {
+            // Same time budget as video: keep the pump responsive.
+            if decoded > 0 && started.elapsed() >= Duration::from_millis(4) {
+                break;
+            }
             match audio.next_chunk() {
                 Ok(AudioOutcome::Samples(samples)) => {
                     let written = output.push(&samples);
@@ -370,28 +385,48 @@ impl PlaybackSession {
         if self.playing
             && self
                 .stats_last
-                .map(|(when, _, _, _)| when.elapsed() >= Duration::from_secs(2))
+                .map(|(when, _, _, _, _)| when.elapsed() >= Duration::from_secs(2))
                 .unwrap_or(true)
         {
             let (decoded, displayed, dropped) = self.stats;
-            let (last_decoded, last_displayed, last_dropped) = self
+            let (last_decoded, last_displayed, last_dropped, last_position) = self
                 .stats_last
-                .map(|(_, decoded, displayed, dropped)| (decoded, displayed, dropped))
-                .unwrap_or((0, 0, 0));
+                .map(|(_, decoded, displayed, dropped, position)| {
+                    (decoded, displayed, dropped, position)
+                })
+                .unwrap_or((0, 0, 0, self.position_us));
             let underruns = self
                 .output
                 .as_ref()
                 .map(|output| output.underruns())
                 .unwrap_or(0);
+            let (render_us, renders) = self.render_stats;
+            let average_render_ms = if renders > 0 {
+                render_us as f64 / renders as f64 / 1000.0
+            } else {
+                0.0
+            };
+            let wall_ms = self
+                .stats_last
+                .map(|(when, _, _, _, _)| when.elapsed().as_millis() as i64)
+                .unwrap_or(2000);
+            let media_ms = (self.position_us - last_position).max(0) / 1000;
             log::info!(
-                "playback 2s: decoded {}, displayed {}, dropped {}, audio underruns {}",
+                "playback 2s: decoded {}, displayed {}, dropped {}, audio underruns {}, renders {renders} ({average_render_ms:.1} ms avg), clock {media_ms}/{wall_ms} ms",
                 decoded - last_decoded,
                 displayed - last_displayed,
                 dropped - last_dropped,
-                underruns
+                underruns,
             );
-            self.stats_last = Some((Instant::now(), decoded, displayed, dropped));
+            self.stats_last = Some((Instant::now(), decoded, displayed, dropped, self.position_us));
+            self.render_stats = (0, 0);
         }
+    }
+
+    /// Record how long one frame render took (draw + present).
+    fn add_render_time(&mut self, micros: u64) {
+        self.render_stats.0 += micros;
+        self.render_stats.1 += 1;
     }
 
     fn seek(&mut self, position_us: i64, events: &Option<EventSink>) {
@@ -592,9 +627,14 @@ pub fn run(
                     pan,
                     fill,
                 );
+                let started = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     render_frame(&ctx, state, renderer, transform, &events);
                 }));
+                let elapsed_us = started.elapsed().as_micros() as u64;
+                if let Some(session) = session.as_mut() {
+                    session.add_render_time(elapsed_us);
+                }
                 if let Err(payload) = result {
                     report_panic(&events, "render frame", &*payload);
                 }

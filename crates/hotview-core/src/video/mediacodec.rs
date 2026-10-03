@@ -23,8 +23,8 @@ use ndk_sys::{
     AMediaExtractor_getTrackCount, AMediaExtractor_getTrackFormat, AMediaExtractor_new,
     AMediaExtractor_readSampleData, AMediaExtractor_seekTo, AMediaExtractor_selectTrack,
     AMediaExtractor_setDataSource, AMediaExtractor_setDataSourceFd, AMediaFormat,
-    AMediaFormat_delete, AMediaFormat_getInt32, AMediaFormat_getInt64, AMediaFormat_getString,
-    AMediaFormat_setInt32, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM,
+    AMediaFormat_delete, AMediaFormat_getFloat, AMediaFormat_getInt32, AMediaFormat_getInt64,
+    AMediaFormat_getString, AMediaFormat_setInt32, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM,
     AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED, AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED,
     AMEDIACODEC_INFO_TRY_AGAIN_LATER, SeekMode,
 };
@@ -134,6 +134,13 @@ fn format_int64(format: *mut AMediaFormat, key: &str) -> Option<i64> {
     unsafe {
         let mut out = 0i64;
         AMediaFormat_getInt64(format, cstr(key).as_ptr(), &mut out).then_some(out)
+    }
+}
+
+fn format_float(format: *mut AMediaFormat, key: &str) -> Option<f32> {
+    unsafe {
+        let mut out = 0f32;
+        AMediaFormat_getFloat(format, cstr(key).as_ptr(), &mut out).then_some(out)
     }
 }
 
@@ -349,6 +356,9 @@ impl MediaCodecDecoder {
         let track_width = format_int32(track_format, "width").unwrap_or(0).max(0) as u32;
         let track_height = format_int32(track_format, "height").unwrap_or(0).max(0) as u32;
         let duration_us = format_int64(track_format, "durationUs");
+        let frame_rate = format_float(track_format, "frame-rate")
+            .filter(|rate| *rate > 0.0)
+            .map(|rate| rate as f64);
 
         // Ask for a colour layout we can parse. Software decoders natively
         // produce planar I420, hardware decoders usually NV12.
@@ -413,7 +423,8 @@ impl MediaCodecDecoder {
         }
 
         log::info!(
-            "video decoder {mime}: {width}x{height}, color {color_format:#x}, stride {}, slice {}, crop ({}, {}) {}x{}",
+            "video decoder {mime}: {width}x{height} @ {:.2} fps, color {color_format:#x}, stride {}, slice {}, crop ({}, {}) {}x{}",
+            frame_rate.unwrap_or(0.0),
             geometry.stride,
             geometry.slice_height,
             geometry.left,
@@ -430,7 +441,7 @@ impl MediaCodecDecoder {
                 width,
                 height,
                 duration_us,
-                fps: None,
+                fps: frame_rate,
                 codec: mime,
                 has_audio: false,
             },
