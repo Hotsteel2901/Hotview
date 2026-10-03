@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Hotview · 纯 Rust 照片与视频查看器</title>
 <meta name="description" content="Hotview — a photo &amp; video viewer with a pure Rust core. Desktop (Windows/macOS/Linux) and Android (Material 3 Expressive)." />
-<meta name="theme-color" content="#07080f" />
+<meta name="theme-color" content="#06060b" />
 <meta property="og:title" content="Hotview · Rust photo &amp; video viewer" />
 <meta property="og:description" content="wgpu rendering, FFmpeg + MediaCodec decoding, Material 3 Expressive on Android." />
 <meta property="og:type" content="website" />
@@ -27,7 +27,7 @@
 </div>
 
 <!-- ============================ svg defs ============================= -->
-<svg class="defs" aria-hidden="true" focusable="false">
+<svg class="defs" aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden">
   <defs>
     <linearGradient id="flame" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#ffe082" />
@@ -71,8 +71,7 @@
       <button type="button" role="tab" data-lang="de">DE</button>
       <button type="button" role="tab" data-lang="ru">RU</button>
     </div>
-    <button class="icon-btn theme-btn" type="button" data-mode="auto" aria-label="Theme"
-            title="Theme">
+    <button class="icon-btn theme-btn" type="button" data-mode="auto" aria-label="Theme" title="Theme">
       <svg class="ico ico-auto" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8" />
         <path class="half" d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" />
@@ -132,21 +131,21 @@
   </div>
 
   <div class="hero-art reveal" style="--i:1" aria-hidden="true">
-    <div class="art-glow"></div>
-    <div class="ring ring-outer"></div>
-    <div class="ring ring-mid"></div>
-    <div class="ring ring-inner"></div>
+    <div class="art-orbit orbit-1"><span class="sat sandy"></span></div>
+    <div class="art-orbit orbit-2"><span class="sat azure"></span></div>
+    <div class="art-orbit orbit-3"><span class="sat violet"></span></div>
 
-    <div class="orbit orbit-1"><span class="sat sandy"></span></div>
-    <div class="orbit orbit-2"><span class="sat azure"></span></div>
-    <div class="orbit orbit-3"><span class="sat violet"></span></div>
-
-    <svg class="art-mark" viewBox="0 0 108 108">
-      <path class="art-ring" fill="none" stroke="url(#lens)" stroke-width="3.6"
-        d="M54,27 a27,27 0 1,0 0,54 a27,27 0 1,0 0,-54 z M54,35 a19,19 0 1,1 0,38 a19,19 0 1,1 0,-38 z" />
-      <path class="art-flame" fill="url(#flame)"
-        d="M54,37.5 C50.2,45 46,48 46,55 C46,62 49.9,67.5 54,67.5 C58.1,67.5 62,62 62,55 C62,51 59.6,48 57,44 C56.2,47 55,48.5 53.8,49.5 C54.7,45 54.7,41 54,37.5 Z" />
-    </svg>
+    <div class="player-card">
+      <div class="player-shot">
+        <span class="shot-chip">AVIF · 6016 × 4016</span>
+        <span class="play-orb"></span>
+      </div>
+      <div class="player-meta">
+        <span class="pm-name">hotview_showcase.avif</span>
+        <span class="pm-time">00:32 / 04:10</span>
+      </div>
+      <div class="player-seek"><i></i></div>
+    </div>
 
     <div class="floaters">
       <span class="float-chip" style="--d:0s">wgpu</span>
@@ -167,19 +166,19 @@
 
 <!-- ============================== stats =============================== -->
 <section class="stats reveal" style="--i:2">
-  <div class="stat glass tilt">
+  <div class="stat tilt">
     <b data-count="25" data-suffix="+">0</b>
     <span data-i18n="stats.formats">图片 / 视频格式</span>
   </div>
-  <div class="stat glass tilt">
+  <div class="stat tilt">
     <b data-count="5" data-suffix="">0</b>
     <span data-i18n="stats.platforms">平台（含 3 种 ABI）</span>
   </div>
-  <div class="stat glass tilt">
+  <div class="stat tilt">
     <b data-count="100" data-suffix="%">0</b>
     <span data-i18n="stats.rust">Rust 解码与渲染</span>
   </div>
-  <div class="stat glass tilt">
+  <div class="stat tilt">
     <b class="stat-text">Apache-2.0</b>
     <span data-i18n="stats.license">开源许可证</span>
   </div>
@@ -193,7 +192,7 @@
   </header>
 
   <div class="cards">
-    <article class="card glass tilt reveal" style="--i:0">
+    <article class="card tilt reveal" style="--i:0">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7" /></svg>
       </span>
@@ -201,7 +200,7 @@
       <p data-i18n="f1.desc">image crate 覆盖常见图片格式，FFmpeg 兜底 AVIF / HEIC / JPEG XL；桌面与 Android 共用同一套帧与色彩管线。</p>
     </article>
 
-    <article class="card glass tilt reveal" style="--i:1">
+    <article class="card tilt reveal" style="--i:1">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 19h18L12 3z" /></svg>
       </span>
@@ -209,7 +208,7 @@
       <p data-i18n="f2.desc">RGBA 与 I420 / NV12 着色器在 GPU 上完成 BT.601/709/2020 色彩矩阵，contain 适配与平移钳制两端行为一致。</p>
     </article>
 
-    <article class="card glass tilt reveal" style="--i:2">
+    <article class="card tilt reveal" style="--i:2">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM9 9l6 3-6 3z" /></svg>
       </span>
@@ -217,7 +216,7 @@
       <p data-i18n="f3.desc">Android 走 MediaCodec 视频/音频与 AAudio 无锁输出；桌面走 FFmpeg + swresample + cpal。音频时钟做音画同步。</p>
     </article>
 
-    <article class="card glass tilt reveal" style="--i:3">
+    <article class="card tilt reveal" style="--i:3">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 8 8 6 6 0 0 1-8-8z" /></svg>
       </span>
@@ -225,7 +224,7 @@
       <p data-i18n="f4.desc">Monet 莫奈取色、液态玻璃悬浮底栏、预测性返回、错落进场与弹性动效，界面会呼吸。</p>
     </article>
 
-    <article class="card glass tilt reveal" style="--i:4">
+    <article class="card tilt reveal" style="--i:4">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v10H4zM8 20h8" /></svg>
       </span>
@@ -233,7 +232,7 @@
       <p data-i18n="f5.desc">Windows / macOS(arm64 · x86_64) / Linux / Android 五份产物由 CI 自动出包，Android 覆盖 arm64、armv7、x86_64。</p>
     </article>
 
-    <article class="card glass tilt reveal" style="--i:5">
+    <article class="card tilt reveal" style="--i:5">
       <span class="card-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 4v5c0 4.4-3 8.4-7 9.5C8 20.4 5 16.4 5 12V7l7-4z" /></svg>
       </span>
@@ -280,7 +279,7 @@
   </header>
 
   <div class="pipeline">
-    <div class="step glass tilt reveal" style="--i:0">
+    <div class="step tilt reveal" style="--i:0">
       <span class="step-num">01</span>
       <h3 data-i18n="p1.title">解码</h3>
       <p data-i18n="p1.desc">image / FFmpeg / MediaCodec 输出 RGBA 或 YUV 4:2:0 帧，硬件解码优先。</p>
@@ -294,7 +293,7 @@
         </circle>
       </svg>
     </div>
-    <div class="step glass tilt reveal" style="--i:1">
+    <div class="step tilt reveal" style="--i:1">
       <span class="step-num">02</span>
       <h3 data-i18n="p2.title">色彩变换</h3>
       <p data-i18n="p2.desc">GPU 着色器完成矩阵与量程转换，CPU 端仅在必要时做多声道下混与缩放。</p>
@@ -308,7 +307,7 @@
         </circle>
       </svg>
     </div>
-    <div class="step glass tilt reveal" style="--i:2">
+    <div class="step tilt reveal" style="--i:2">
       <span class="step-num">03</span>
       <h3 data-i18n="p3.title">上屏</h3>
       <p data-i18n="p3.desc">wgpu 把纹理合成到 ANativeWindow 或 egui 视图，缩放、平移与分页动效都在 GPU 完成。</p>
@@ -338,7 +337,7 @@
           <i class="tile video"><svg viewBox="0 0 24 24"><path d="M9 6l10 6-10 6z" /></svg><em>0:32</em></i>
           <i class="tile"></i><i class="tile"></i><i class="tile"></i>
         </div>
-        <div class="phone-bar glass">
+        <div class="phone-bar">
           <span class="bar-pill"></span>
           <span class="bar-item active"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z" /><path d="M8 9l6 3-6 3z" /></svg><b data-i18n="tabs.albums">相册</b></span>
           <span class="bar-item"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" /></svg><b data-i18n="tabs.photos">照片</b></span>
@@ -354,7 +353,7 @@
         <span class="win-title">Hotview</span>
         <span class="win-tools"><i></i><i></i></span>
       </div>
-      <div class="win-toolbar glass">
+      <div class="win-toolbar">
         <span class="tb-btn" data-i18n="showcase.open">打开文件夹…</span>
         <span class="tb-btn" data-i18n="showcase.prev">◀ 上一张</span>
         <span class="tb-btn" data-i18n="showcase.next">下一张 ▶</span>
@@ -366,7 +365,7 @@
         <div class="zoom-box">
           <div class="zoom-art"></div>
         </div>
-        <div class="win-status glass">
+        <div class="win-status">
           <span data-i18n="showcase.video">video_2026.mp4</span>
           <span class="play-dot"></span>
           <span class="seekbar"><i class="seek-fill"></i><i class="seek-knob"></i></span>
@@ -385,22 +384,22 @@
   </header>
 
   <div class="downloads">
-    <a class="download-card glass tilt reveal" style="--i:0"
+    <a class="download-card tilt reveal" style="--i:0"
        href="https://github.com/Hotsteel2901/Hotview/releases" target="_blank" rel="noreferrer">
       <svg class="os" viewBox="0 0 24 24"><path d="M12 3c3 0 5 2.4 5 6 0 4-2 8-5 12-3-4-5-8-5-12 0-3.6 2-6 5-6z" /></svg>
       <b>Linux</b><small>.tar.gz · x86_64</small>
     </a>
-    <a class="download-card glass tilt reveal" style="--i:1"
+    <a class="download-card tilt reveal" style="--i:1"
        href="https://github.com/Hotsteel2901/Hotview/releases" target="_blank" rel="noreferrer">
       <svg class="os" viewBox="0 0 24 24"><path d="M4 5h16v14H4z" /></svg>
       <b>macOS</b><small>.tar.gz · arm64 / x86_64</small>
     </a>
-    <a class="download-card glass tilt reveal" style="--i:2"
+    <a class="download-card tilt reveal" style="--i:2"
        href="https://github.com/Hotsteel2901/Hotview/releases" target="_blank" rel="noreferrer">
       <svg class="os" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
       <b>Windows</b><small>.zip · x86_64</small>
     </a>
-    <a class="download-card glass tilt reveal" style="--i:3"
+    <a class="download-card tilt reveal" style="--i:3"
        href="https://github.com/Hotsteel2901/Hotview/releases" target="_blank" rel="noreferrer">
       <svg class="os" viewBox="0 0 24 24"><path d="M6 10h2v5H6zM11 6h2v12h-2zM16 9h2v6h-2z" /></svg>
       <b>Android</b><small>APK / AAB · Android 8+</small>
