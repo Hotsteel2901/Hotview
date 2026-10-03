@@ -92,4 +92,8 @@
     <string name="settings_fit_contain">适应</string>
     <string name="settings_fit_cover">填满</string>
     <string name="settings_start_tab">启动时显示</string>
+    <string name="settings_background_playback">后台播放</string>
+    <string name="playback_channel">播放控制</string>
+    <string name="action_play">播放</string>
+    <string name="action_pause">暂停</string>
 </resources>

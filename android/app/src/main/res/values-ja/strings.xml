@@ -92,4 +92,8 @@
     <string name="settings_fit_contain">フィット</string>
     <string name="settings_fit_cover">埋める</string>
     <string name="settings_start_tab">起動時の画面</string>
+    <string name="settings_background_playback">バックグラウンド再生</string>
+    <string name="playback_channel">再生コントロール</string>
+    <string name="action_play">再生</string>
+    <string name="action_pause">一時停止</string>
 </resources>

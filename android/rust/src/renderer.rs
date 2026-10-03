@@ -97,6 +97,8 @@ struct PlaybackSession {
     first_frame_sent: bool,
     wall_clock: Option<(Instant, i64)>,
     audio_base: Option<(u64, i64)>,
+    /// Wall-clock anchor used to interpolate between coarse audio reports.
+    clock_anchor: Option<(Instant, i64)>,
     /// PCM the ring was too full to accept last time; pushed first next round
     /// so no sample is ever dropped (dropped samples are audible clicks).
     audio_pending: Vec<f32>,
@@ -165,6 +167,7 @@ impl PlaybackSession {
             first_frame_sent: false,
             wall_clock: None,
             audio_base: None,
+            clock_anchor: None,
             audio_pending: Vec::new(),
             stats: (0, 0, 0),
             render_stats: (0, 0),
@@ -177,7 +180,8 @@ impl PlaybackSession {
         self.output.is_some()
     }
 
-    fn clock_position(&self) -> i64 {
+    /// Raw clock: the audio device position, or the wall clock without audio.
+    fn raw_clock(&self) -> i64 {
         if let (Some(output), Some((base_frames, base_us))) = (&self.output, self.audio_base) {
             let frames = output.played_frames().saturating_sub(base_frames);
             return base_us + (frames as i64) * 1_000_000 / output.sample_rate().max(1) as i64;
@@ -186,6 +190,26 @@ impl PlaybackSession {
             Some((started, media)) => media + started.elapsed().as_micros() as i64,
             None => self.position_us,
         }
+    }
+
+    /// Smoothed playback position.
+    ///
+    /// The audio device reports its position in callback-sized steps (tens of
+    /// ms), which makes several video frames "due" at once and forces drops.
+    /// Interpolate with the wall clock between reports, re-anchor when the raw
+    /// clock catches up, and never run more than 100 ms ahead of it.
+    fn clock_position(&mut self) -> i64 {
+        let target = self.raw_clock();
+        let now = Instant::now();
+        let mut smoothed = match self.clock_anchor {
+            Some((anchor, position)) => position + anchor.elapsed().as_micros() as i64,
+            None => target,
+        };
+        if target >= smoothed || smoothed > target + 100_000 {
+            smoothed = target;
+            self.clock_anchor = Some((now, target));
+        }
+        smoothed.max(0)
     }
 
     fn fill_video(&mut self, events: &Option<EventSink>) {
@@ -319,33 +343,40 @@ impl PlaybackSession {
     fn pump(
         &mut self,
         ctx: &GpuContext,
-        renderer: &mut MediaRenderer,
+        mut renderer: Option<&mut MediaRenderer>,
         shared: &Shared,
         dirty: &mut bool,
         events: &Option<EventSink>,
     ) {
-        self.fill_video(events);
+        let has_renderer = renderer.is_some();
+        // Without a surface (background audio) video is not decoded; it is
+        // re-synced with the clock when a surface comes back.
+        if has_renderer {
+            self.fill_video(events);
+        }
         self.fill_audio();
 
         if self.playing {
             let position = self.clock_position();
-            // Show the newest frame that is due and drop stale ones: when the
-            // clock jumps ahead (or we were busy), catching up must not play
-            // the backlog back as a fast-forward burst.
-            let mut due_frame: Option<MediaFrame> = None;
-            while let Some(front) = self.frames.front() {
-                if front.pts_us().unwrap_or(self.last_pts_us) <= position + 20_000 {
-                    if due_frame.is_some() {
-                        self.stats.2 += 1;
+            if let Some(renderer) = renderer.as_deref_mut() {
+                // Show the newest frame that is due and drop stale ones: when
+                // the clock jumps ahead (or we were busy), catching up must not
+                // play the backlog back as a fast-forward burst.
+                let mut due_frame: Option<MediaFrame> = None;
+                while let Some(front) = self.frames.front() {
+                    if front.pts_us().unwrap_or(self.last_pts_us) <= position + 20_000 {
+                        if due_frame.is_some() {
+                            self.stats.2 += 1;
+                        }
+                        due_frame = self.frames.pop_front();
+                    } else {
+                        break;
                     }
-                    due_frame = self.frames.pop_front();
-                } else {
-                    break;
                 }
-            }
-            if let Some(frame) = due_frame {
-                self.stats.1 += 1;
-                self.display(frame, ctx, renderer, dirty, events);
+                if let Some(frame) = due_frame {
+                    self.stats.1 += 1;
+                    self.display(frame, ctx, renderer, dirty, events);
+                }
             }
 
             let audio_drained = self
@@ -353,8 +384,9 @@ impl PlaybackSession {
                 .as_ref()
                 .map(|output| self.audio_eos && output.buffered_samples() == 0)
                 .unwrap_or(true);
+            let video_done = self.video_eos || !has_renderer;
 
-            if self.frames.is_empty() && self.video_eos && audio_drained {
+            if self.frames.is_empty() && video_done && audio_drained {
                 if self.looping {
                     self.restart(events);
                 } else if !self.ended_sent {
@@ -370,9 +402,11 @@ impl PlaybackSession {
                 }
             }
         } else if self.needs_display {
-            if let Some(frame) = self.frames.pop_front() {
-                self.display(frame, ctx, renderer, dirty, events);
-                self.needs_display = false;
+            if let Some(renderer) = renderer.as_deref_mut() {
+                if let Some(frame) = self.frames.pop_front() {
+                    self.display(frame, ctx, renderer, dirty, events);
+                    self.needs_display = false;
+                }
             }
         }
 
@@ -461,6 +495,7 @@ impl PlaybackSession {
                 .unwrap_or(0),
             position_us,
         ));
+        self.clock_anchor = None;
         if self.playing {
             if let Some(output) = &self.output {
                 output.request_start();
@@ -476,6 +511,17 @@ impl PlaybackSession {
         if let Some(output) = &self.output {
             output.request_start();
         }
+    }
+
+    /// Re-align the video decoder with the clock after a surface came back
+    /// (the video was not decoded while playing in the background).
+    fn resync_video(&mut self, position_us: i64) {
+        let _ = self.video.seek(position_us);
+        self.frames.clear();
+        self.video_eos = false;
+        self.ended_sent = false;
+        self.needs_display = true;
+        self.last_pts_us = position_us;
     }
 
     fn set_playing(&mut self, playing: bool) {
@@ -496,6 +542,7 @@ impl PlaybackSession {
                     .unwrap_or(0),
                 position,
             ));
+            self.clock_anchor = None;
             if let Some(output) = &self.output {
                 output.request_start();
             }
@@ -614,8 +661,8 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
 
-        if let (Some(session), Some(renderer)) = (&mut session, &mut renderer) {
-            session.pump(&ctx, renderer, &shared, &mut dirty, &events);
+        if let Some(session) = session.as_mut() {
+            session.pump(&ctx, renderer.as_mut(), &shared, &mut dirty, &events);
         }
 
         if dirty {
@@ -719,6 +766,14 @@ fn handle_command(
                         logged_failure: false,
                         logged_success: false,
                     });
+                    // Video was not decoded while there was no surface; point
+                    // the decoder at the current clock position again.
+                    if let Some(session) = session.as_mut() {
+                        if session.playing {
+                            let position = session.clock_position();
+                            session.resync_video(position);
+                        }
+                    }
                     *dirty = true;
                 }
                 Err(err) => {

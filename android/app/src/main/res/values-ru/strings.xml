@@ -92,4 +92,8 @@
     <string name="settings_fit_contain">Вписать</string>
     <string name="settings_fit_cover">Заполнить</string>
     <string name="settings_start_tab">Экран при запуске</string>
+    <string name="settings_background_playback">Фоновое воспроизведение</string>
+    <string name="playback_channel">Воспроизведение</string>
+    <string name="action_play">Воспроизвести</string>
+    <string name="action_pause">Пауза</string>
 </resources>

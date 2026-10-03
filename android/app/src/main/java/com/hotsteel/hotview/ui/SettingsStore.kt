@@ -60,6 +60,13 @@ class SettingsStore(private val preferences: SharedPreferences) {
             preferences.edit().putInt(KEY_START_TAB, value.coerceIn(0, 2)).apply()
         }
 
+    /** Keep playback alive (audio + notification) when the app is backgrounded. */
+    var backgroundPlayback: Boolean
+        get() = preferences.getBoolean(KEY_BACKGROUND_PLAYBACK, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_BACKGROUND_PLAYBACK, value).apply()
+        }
+
     companion object {
         private const val KEY_SOFTWARE_DECODE = "video.software_decode"
         private const val KEY_AUTOPLAY = "video.autoplay"
@@ -68,6 +75,7 @@ class SettingsStore(private val preferences: SharedPreferences) {
         private const val KEY_KEEP_SCREEN_ON = "ui.keep_screen_on"
         private const val KEY_FILL_SCREEN = "ui.fill_screen"
         private const val KEY_START_TAB = "ui.start_tab"
+        private const val KEY_BACKGROUND_PLAYBACK = "playback.background"
 
         fun from(context: Context): SettingsStore =
             SettingsStore(context.getSharedPreferences("hotview", Context.MODE_PRIVATE))

@@ -92,4 +92,8 @@
     <string name="settings_fit_contain">Anpassen</string>
     <string name="settings_fit_cover">Füllen</string>
     <string name="settings_start_tab">Startansicht</string>
+    <string name="settings_background_playback">Hintergrundwiedergabe</string>
+    <string name="playback_channel">Wiedergabe</string>
+    <string name="action_play">Wiedergabe</string>
+    <string name="action_pause">Pausieren</string>
 </resources>

@@ -77,6 +77,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hotsteel.hotview.media.MediaItem
 import com.hotsteel.hotview.native.MediaSurfaceView
+import com.hotsteel.hotview.playback.BackgroundPlaybackService
+import com.hotsteel.hotview.playback.NowPlaying
 import kotlin.math.abs
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -116,6 +118,7 @@ fun ViewerScreen(
     ) { items.size }
     val currentItem = items.getOrNull(pagerState.currentPage)
     val settings = rememberSettingsStore()
+    val context = LocalContext.current
 
     var controlsVisible by remember { mutableStateOf(true) }
     var infoItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -141,14 +144,35 @@ fun ViewerScreen(
         onDispose { rootView.keepScreenOn = false }
     }
 
-    // Android 17 hardens background audio: pause as soon as we are not visible.
+    // Android 17 hardens background audio: pause when leaving unless the user
+    // enabled background playback, in which case a mediaPlayback foreground
+    // service keeps the audio going and the notification controls it. The
+    // service follows playback state (starting an FGS from the background is
+    // restricted on Android 12+, so it is started while still visible).
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) currentView?.pause()
+            if (event == Lifecycle.Event.ON_STOP && !settings.backgroundPlayback) {
+                currentView?.pause()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            BackgroundPlaybackService.stop(context)
+            NowPlaying.detach()
+        }
+    }
+
+    LaunchedEffect(isPlaying, currentView, settings.backgroundPlayback) {
+        val view = currentView
+        if (settings.backgroundPlayback && isPlaying && view != null) {
+            NowPlaying.attach(view, currentItem?.displayName.orEmpty())
+            BackgroundPlaybackService.start(context)
+        } else if (!isPlaying) {
+            BackgroundPlaybackService.stop(context)
+            NowPlaying.detach()
+        }
     }
 
     PredictiveBackHandler(enabled = true) { progress ->

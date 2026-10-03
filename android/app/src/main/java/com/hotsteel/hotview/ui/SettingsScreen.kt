@@ -3,6 +3,8 @@ package com.hotsteel.hotview.ui
 import android.app.LocaleManager
 import android.os.Build
 import android.os.LocaleList
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +67,12 @@ fun SettingsScreen(onBack: () -> Unit) {
     var keepScreenOn by remember { mutableStateOf(settings.keepScreenOn) }
     var fillScreen by remember { mutableStateOf(settings.fillScreen) }
     var startTab by remember { mutableStateOf(settings.startTab) }
+    var backgroundPlayback by remember { mutableStateOf(settings.backgroundPlayback) }
+
+    // Android 13+ needs the notification permission for the playback notice.
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
 
     val localeManager = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -173,6 +181,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 ) {
                     keepScreenOn = it
                     settings.keepScreenOn = it
+                }
+                SwitchRow(
+                    label = stringResource(R.string.settings_background_playback),
+                    checked = backgroundPlayback,
+                ) {
+                    backgroundPlayback = it
+                    settings.backgroundPlayback = it
+                    if (it && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermission.launch(
+                            android.Manifest.permission.POST_NOTIFICATIONS,
+                        )
+                    }
                 }
             }
 
