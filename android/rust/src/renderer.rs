@@ -379,19 +379,29 @@ impl PlaybackSession {
     }
 }
 
+/// Owns one `ANativeWindow*` reference.
+///
+/// Declared *after* the wgpu surface inside [`SurfaceState`] on purpose: struct
+/// fields drop in declaration order, so the Vulkan surface is destroyed while
+/// the window is still valid. Releasing the window first is a use-after-free
+/// that crashes the process when a surface is recycled.
+struct WindowRef(*mut c_void);
+
+impl Drop for WindowRef {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                ndk_sys::ANativeWindow_release(self.0 as *mut ndk_sys::ANativeWindow);
+            }
+        }
+    }
+}
+
 struct SurfaceState {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    /// The `ANativeWindow*` reference we own; released after the surface dies.
-    window: *mut c_void,
-}
-
-impl Drop for SurfaceState {
-    fn drop(&mut self) {
-        unsafe {
-            ndk_sys::ANativeWindow_release(self.window as *mut ndk_sys::ANativeWindow);
-        }
-    }
+    /// Must stay last: dropped after `surface`.
+    _window: WindowRef,
 }
 
 /// Entry point of the render thread.
@@ -516,7 +526,13 @@ fn handle_command(
                         .iter()
                         .copied()
                         .find(|format| !format.is_srgb())
-                        .unwrap_or_else(|| caps.formats[0]);
+                        .or_else(|| caps.formats.first().copied())
+                        .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
+                    let alpha_mode = caps
+                        .alpha_modes
+                        .first()
+                        .copied()
+                        .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
                     let config = wgpu::SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format,
@@ -524,7 +540,7 @@ fn handle_command(
                         width: width.max(1),
                         height: height.max(1),
                         present_mode: wgpu::PresentMode::Fifo,
-                        alpha_mode: caps.alpha_modes[0],
+                        alpha_mode,
                         view_formats: vec![],
                         desired_maximum_frame_latency: 2,
                     };
@@ -543,7 +559,7 @@ fn handle_command(
                     *surface = Some(SurfaceState {
                         surface: new_surface,
                         config,
-                        window: window.0,
+                        _window: WindowRef(window.0),
                     });
                     *dirty = true;
                 }

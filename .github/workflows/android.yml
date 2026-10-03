@@ -3,6 +3,8 @@ name: Android
 on:
   # Manual only: run it from the Actions tab (or `gh workflow run android.yml`).
   workflow_dispatch:
+  # Also callable from release.yml (tag + GitHub Release).
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always

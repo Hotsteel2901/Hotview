@@ -47,6 +47,7 @@
     <string name="action_loop">Wiederholen</string>
     <string name="action_open_github">GitHub öffnen</string>
     <string name="viewer_no_audio">Keine Audiospur</string>
+    <string name="viewer_renderer_failed">Renderer konnte nicht starten: %1$s</string>
     <string name="viewer_video_unsupported">Dieses Video kann nicht dekodiert werden (Codec auf diesem Gerät nicht unterstützt)</string>
     <string name="viewer_image_unsupported">Dieses Bild kann nicht dekodiert werden</string>
 

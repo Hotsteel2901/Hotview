@@ -47,6 +47,7 @@
     <string name="action_loop">ループ再生</string>
     <string name="action_open_github">GitHub を開く</string>
     <string name="viewer_no_audio">音声トラックなし</string>
+    <string name="viewer_renderer_failed">レンダラーの初期化に失敗: %1$s</string>
     <string name="viewer_video_unsupported">この動画はデコードできません（この端末では未対応のコーデックです）</string>
     <string name="viewer_image_unsupported">この画像はデコードできません</string>
 

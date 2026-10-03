@@ -1,0 +1,107 @@
+name: Release
+
+# One-click release: builds everything (desktop + Android), then publishes a
+# GitHub Release whose tag is `10000 + commit count` and whose title is
+# `v1.{commits/100}.{commits%100}` — both derived from the commit history.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    name: Build desktop
+    uses: ./.github/workflows/desktop.yml
+    secrets: inherit
+
+  android:
+    name: Build Android
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
+  release:
+    name: Publish release
+    needs: [desktop, android]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        run: |
+          COMMITS=$(git rev-list --count HEAD)
+          TAG=$((10000 + COMMITS))
+          MINOR=$((COMMITS / 100))
+          PATCH=$((COMMITS % 100))
+          TITLE="v1.${MINOR}.${PATCH}"
+          {
+            echo "commits=$COMMITS"
+            echo "tag=$TAG"
+            echo "title=$TITLE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $TITLE (tag $TAG) from $COMMITS commits"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find dist -type f \
+            \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.apk' -o -name '*.aab' \) \
+            ! -name 'app-debug.apk' -print0 |
+            while IFS= read -r -d '' file; do
+              base=$(basename "$file")
+              case "$base" in
+                app-release.apk)  target="hotview-android-release.apk" ;;
+                app-release.aab)  target="hotview-android-release.aab" ;;
+                *)                target="$base" ;;
+              esac
+              cp "$file" "release-assets/$target"
+            done
+          ls -la release-assets
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TITLE: ${{ steps.version.outputs.title }}
+          COMMITS: ${{ steps.version.outputs.commits }}
+        run: |
+          {
+            echo "**$TITLE** · tag \`$TAG\` · built from commit #$COMMITS."
+            echo
+            echo "- 桌面端：Linux / macOS (arm64 · x86_64) / Windows，开箱即用"
+            echo "- Android：release APK 与 AAB（CI 使用项目密钥签名）"
+            echo "- 如需自行构建，见 README；两个构建工作流也可单独手动触发"
+            echo
+            echo "Assets 中的 APK 可直接安装；桌面包解压后运行 \`hotview\`。"
+            echo
+            echo "### 最近提交"
+            git log --pretty=format:'- %s' -n 20 HEAD
+            echo
+          } > notes.md
+          head -20 notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — updating assets"
+            gh release edit "$TAG" --title "$TITLE" --notes-file notes.md
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes-file notes.md
+          fi
+          echo "Release: $(gh release view "$TAG" --json url -q .url)"

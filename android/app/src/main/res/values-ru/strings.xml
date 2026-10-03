@@ -47,6 +47,7 @@
     <string name="action_loop">Повтор</string>
     <string name="action_open_github">Открыть GitHub</string>
     <string name="viewer_no_audio">Нет аудиодорожки</string>
+    <string name="viewer_renderer_failed">Не удалось запустить рендерер: %1$s</string>
     <string name="viewer_video_unsupported">Не удалось декодировать видео (кодек не поддерживается устройством)</string>
     <string name="viewer_image_unsupported">Не удалось декодировать изображение</string>
 

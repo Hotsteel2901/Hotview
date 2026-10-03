@@ -49,5 +49,16 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_initLogger(
     let logger = LOGGER.get_or_init(|| LogcatLogger);
     let _ = log::set_logger(logger);
     log::set_max_level(log::LevelFilter::Debug);
+
+    // Make native panics visible in logcat instead of a silent abort.
+    static HOOK: OnceLock<()> = OnceLock::new();
+    HOOK.get_or_init(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            log::error!("native panic: {info}");
+            previous(info);
+        }));
+    });
+
     log::info!("hotview native library loaded");
 }

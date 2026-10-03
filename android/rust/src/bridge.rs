@@ -25,10 +25,10 @@ use crate::renderer::{ack_pair, spawn, Command, SendWindow, Shared};
 
 /// Refuse to decode images larger than this; Kotlin falls back to the platform
 /// decoder with an appropriate sample size for those.
-const MAX_IMAGE_PIXELS: u64 = 80_000_000;
+const MAX_IMAGE_PIXELS: u64 = 24_000_000;
 
 /// Largest texture edge we upload.
-const MAX_TEXTURE_DIM: u32 = 4096;
+const MAX_TEXTURE_DIM: u32 = 3072;
 
 struct Handle {
     tx: Sender<Command>,

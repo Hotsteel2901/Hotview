@@ -8,16 +8,19 @@ import android.net.Uri
 import android.os.Build
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import com.hotsteel.hotview.R
 import com.hotsteel.hotview.media.MediaItem
 import java.nio.ByteBuffer
 import kotlin.math.max
-import com.hotsteel.hotview.R
 
 /**
  * A `SurfaceView` whose contents are rendered by the Rust wgpu renderer.
  * Images are decoded in Rust; videos go through Rust + MediaCodec. When the
  * Rust decoder does not know a format (HEIC), Kotlin decodes the image and
  * hands the RGBA buffer back to the renderer.
+ *
+ * Every native call is wrapped so a JNI problem degrades into an error message
+ * instead of taking the process down.
  */
 class MediaSurfaceView(context: Context) :
     SurfaceView(context),
@@ -37,34 +40,53 @@ class MediaSurfaceView(context: Context) :
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        if (handle == 0L) {
-            handle = NativeBridge.createRenderer(
-                holder.surface,
-                width.coerceAtLeast(1),
-                height.coerceAtLeast(1),
-                this,
-            )
-        } else {
-            NativeBridge.attachSurface(
-                handle,
-                holder.surface,
-                width.coerceAtLeast(1),
-                height.coerceAtLeast(1),
-            )
+        val created = runCatching {
+            if (handle == 0L) {
+                NativeBridge.createRenderer(
+                    holder.surface,
+                    width.coerceAtLeast(1),
+                    height.coerceAtLeast(1),
+                    this,
+                )
+            } else {
+                NativeBridge.attachSurface(
+                    handle,
+                    holder.surface,
+                    width.coerceAtLeast(1),
+                    height.coerceAtLeast(1),
+                )
+                handle
+            }
         }
-        pending?.invoke()
+        created.onFailure { error ->
+            handle = 0L
+            post {
+                onErrorEvent?.invoke(
+                    context.getString(R.string.viewer_renderer_failed, error.javaClass.simpleName),
+                )
+            }
+        }
+        val newHandle = created.getOrNull() ?: 0L
+        if (newHandle != 0L) {
+            handle = newHandle
+        }
+        if (handle != 0L) {
+            pending?.invoke()
+        }
         pending = null
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {
-        if (handle != 0L) {
-            NativeBridge.surfaceChanged(handle, w.coerceAtLeast(1), h.coerceAtLeast(1))
+        val current = handle
+        if (current != 0L) {
+            runCatching { NativeBridge.surfaceChanged(current, w.coerceAtLeast(1), h.coerceAtLeast(1)) }
         }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        if (handle != 0L) {
-            NativeBridge.releaseSurface(handle)
+        val current = handle
+        if (current != 0L) {
+            runCatching { NativeBridge.releaseSurface(current) }
         }
     }
 
@@ -78,17 +100,23 @@ class MediaSurfaceView(context: Context) :
     }
 
     private fun loadInternal(item: MediaItem) {
-        val status = open(item.uri) { fd, offset, length ->
-            if (item.isVideo) {
-                NativeBridge.setVideoFile(handle, fd, offset, length)
-            } else {
-                NativeBridge.setImageFile(handle, fd, offset, length)
+        val status = runCatching {
+            open(item.uri) { fd, offset, length ->
+                if (item.isVideo) {
+                    NativeBridge.setVideoFile(handle, fd, offset, length)
+                } else {
+                    NativeBridge.setImageFile(handle, fd, offset, length)
+                }
             }
-        }
-        if (!item.isVideo && status != NativeBridge.STATUS_OK) {
-            decodeWithPlatform(item.uri)
-        } else if (item.isVideo && status != NativeBridge.STATUS_OK) {
+        }.getOrNull()
+
+        if (status == NativeBridge.STATUS_OK) return
+
+        if (item.isVideo) {
             onErrorEvent?.invoke(context.getString(R.string.viewer_video_unsupported))
+        } else {
+            // Rust could not decode it (HEIC/AVIF/…): use the platform decoder.
+            decodeWithPlatform(item.uri)
         }
     }
 
@@ -127,18 +155,19 @@ class MediaSurfaceView(context: Context) :
                 val buffer = ByteBuffer.allocateDirect(argb.byteCount)
                 argb.copyPixelsToBuffer(buffer)
                 buffer.rewind()
-                NativeBridge.setBitmap(handle, buffer, argb.width, argb.height)
+                runCatching { NativeBridge.setBitmap(handle, buffer, argb.width, argb.height) }
             } else if (bitmap == null) {
                 post { onErrorEvent?.invoke(context.getString(R.string.viewer_image_unsupported)) }
             }
         }.start()
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
     private fun decodeWithImageDecoder(uri: Uri): Bitmap {
         val source = ImageDecoder.createSource(context.contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             var sample = 1
-            while (max(info.size.width, info.size.height) / (sample * 2) >= 4096) {
+            while (max(info.size.width, info.size.height) / (sample * 2) >= 3072) {
                 sample *= 2
             }
             decoder.setTargetSampleSize(sample)
@@ -152,7 +181,7 @@ class MediaSurfaceView(context: Context) :
             BitmapFactory.decodeStream(it, null, bounds)
         }
         var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 4096) {
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 3072) {
             sample *= 2
         }
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
@@ -164,39 +193,60 @@ class MediaSurfaceView(context: Context) :
     // ------------------------------------------------------------- controls
 
     fun play() {
-        if (handle != 0L) NativeBridge.setPlaying(handle, true)
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setPlaying(current, true) }
     }
 
     fun pause() {
-        if (handle != 0L) NativeBridge.setPlaying(handle, false)
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setPlaying(current, false) }
     }
 
-    fun isPlaying(): Boolean = handle != 0L && NativeBridge.isPlaying(handle)
+    fun isPlaying(): Boolean {
+        val current = handle
+        return current != 0L && runCatching { NativeBridge.isPlaying(current) }.getOrDefault(false)
+    }
 
-    fun isPrepared(): Boolean = handle != 0L && NativeBridge.isPrepared(handle)
+    fun isPrepared(): Boolean {
+        val current = handle
+        return current != 0L && runCatching { NativeBridge.isPrepared(current) }.getOrDefault(false)
+    }
 
-    fun hasAudio(): Boolean = handle != 0L && NativeBridge.hasAudio(handle)
+    fun hasAudio(): Boolean {
+        val current = handle
+        return current != 0L && runCatching { NativeBridge.hasAudio(current) }.getOrDefault(false)
+    }
 
-    fun positionMs(): Long = if (handle != 0L) NativeBridge.positionMs(handle) else 0L
+    fun positionMs(): Long {
+        val current = handle
+        return if (current != 0L) runCatching { NativeBridge.positionMs(current) }.getOrDefault(0L) else 0L
+    }
 
-    fun durationMs(): Long = if (handle != 0L) NativeBridge.durationMs(handle) else 0L
+    fun durationMs(): Long {
+        val current = handle
+        return if (current != 0L) runCatching { NativeBridge.durationMs(current) }.getOrDefault(0L) else 0L
+    }
 
     fun seekTo(positionMs: Long) {
-        if (handle != 0L) NativeBridge.seekTo(handle, positionMs)
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.seekTo(current, positionMs) }
     }
 
     fun setLooping(looping: Boolean) {
-        if (handle != 0L) NativeBridge.setLooping(handle, looping)
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setLooping(current, looping) }
     }
 
     fun setViewport(scale: Float, panX: Float, panY: Float) {
-        if (handle != 0L) NativeBridge.setViewport(handle, scale, panX, panY)
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setViewport(current, scale, panX, panY) }
     }
 
     fun dispose() {
-        if (handle != 0L) {
-            NativeBridge.destroyRenderer(handle)
-            handle = 0L
+        val current = handle
+        handle = 0L
+        if (current != 0L) {
+            runCatching { NativeBridge.destroyRenderer(current) }
         }
     }
 

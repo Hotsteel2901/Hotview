@@ -47,6 +47,7 @@
     <string name="action_loop">循环播放</string>
     <string name="action_open_github">打开 GitHub</string>
     <string name="viewer_no_audio">无音轨</string>
+    <string name="viewer_renderer_failed">渲染器初始化失败：%1$s</string>
     <string name="viewer_video_unsupported">无法解码该视频（设备可能不支持此编码格式）</string>
     <string name="viewer_image_unsupported">无法解码该图片</string>
 
