@@ -5,10 +5,16 @@ on:
     branches: [main]
     paths-ignore:
       - "android/**"
+      - "docs/**"
+      - ".github/workflows/android.yml"
+      - ".github/workflows/pages.yml"
       - "**/*.md"
   pull_request:
     paths-ignore:
       - "android/**"
+      - "docs/**"
+      - ".github/workflows/android.yml"
+      - ".github/workflows/pages.yml"
       - "**/*.md"
   workflow_dispatch:
 

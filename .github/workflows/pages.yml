@@ -29,6 +29,10 @@ jobs:
 
       - name: Set up Pages
         uses: actions/configure-pages@v6
+        with:
+          # Enable Pages automatically (Actions build type) if it is not
+          # enabled yet, so the first push just works.
+          enablement: true
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v5

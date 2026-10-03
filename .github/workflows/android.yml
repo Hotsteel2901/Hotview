@@ -19,13 +19,6 @@ env:
   # NDK r28c, the default of AGP 9.x.
   NDK_VERSION: "28.2.13676358"
   ANDROID_API: "37"
-  # Signing: keystores are picked up from android/keystore/ (committed) or
-  # decoded from these secrets. Passwords/alias default to "hotsteel".
-  KEYSTORE_RELEASE_B64: ${{ secrets.HOTVIEW_KEYSTORE_BASE64 }}
-  KEYSTORE_DEBUG_B64: ${{ secrets.HOTVIEW_DEBUG_KEYSTORE_BASE64 }}
-  HOTVIEW_KEYSTORE_PASSWORD: ${{ secrets.HOTVIEW_KEYSTORE_PASSWORD || 'hotsteel' }}
-  HOTVIEW_KEY_ALIAS: ${{ secrets.HOTVIEW_KEY_ALIAS || 'hotsteel' }}
-  HOTVIEW_KEY_PASSWORD: ${{ secrets.HOTVIEW_KEY_PASSWORD || 'hotsteel' }}
 
 jobs:
   apk:
@@ -35,6 +28,13 @@ jobs:
       fail-fast: false
       matrix:
         variant: [debug, release]
+    env:
+      # Signing: keystores come from repository secrets (never committed).
+      KEYSTORE_RELEASE_B64: ${{ secrets.HOTVIEW_KEYSTORE_BASE64 }}
+      KEYSTORE_DEBUG_B64: ${{ secrets.HOTVIEW_DEBUG_KEYSTORE_BASE64 }}
+      HOTVIEW_KEYSTORE_PASSWORD: ${{ secrets.HOTVIEW_KEYSTORE_PASSWORD || 'hotsteel' }}
+      HOTVIEW_KEY_ALIAS: ${{ secrets.HOTVIEW_KEY_ALIAS || 'hotsteel' }}
+      HOTVIEW_KEY_PASSWORD: ${{ secrets.HOTVIEW_KEY_PASSWORD || 'hotsteel' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -113,6 +113,13 @@ jobs:
   aab:
     name: Build release AAB
     runs-on: ubuntu-26.04
+    env:
+      # Signing: keystores come from repository secrets (never committed).
+      KEYSTORE_RELEASE_B64: ${{ secrets.HOTVIEW_KEYSTORE_BASE64 }}
+      KEYSTORE_DEBUG_B64: ${{ secrets.HOTVIEW_DEBUG_KEYSTORE_BASE64 }}
+      HOTVIEW_KEYSTORE_PASSWORD: ${{ secrets.HOTVIEW_KEYSTORE_PASSWORD || 'hotsteel' }}
+      HOTVIEW_KEY_ALIAS: ${{ secrets.HOTVIEW_KEY_ALIAS || 'hotsteel' }}
+      HOTVIEW_KEY_PASSWORD: ${{ secrets.HOTVIEW_KEY_PASSWORD || 'hotsteel' }}
     steps:
       - uses: actions/checkout@v7
 
