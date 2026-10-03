@@ -73,7 +73,7 @@ Android 端使用 **wgpu(Vulkan) + NDK MediaCodec 硬件解码**，UI 分别是 
 推送 `docs/` 后由 `.github/workflows/pages.yml` 自动发布。首次使用需在
 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
 
-在线地址：<https://hotsteel2901.github.io/hotview/>
+在线地址：<https://hotsteel2901.github.io/Hotview/>
 
 ---
 
