@@ -34,3 +34,8 @@ android/keystore/*.keystore
 .vscode/
 .DS_Store
 *.swp
+
+# keystore exports must never be committed
+*.b64
+*.base64
+hotsteel.jks.b64

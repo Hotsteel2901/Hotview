@@ -56,6 +56,27 @@ Android 端使用 **wgpu(Vulkan) + NDK MediaCodec 硬件解码**，UI 分别是 
 
 ---
 
+## 落地页
+
+`docs/` 是一份纯静态的 GitHub Pages 落地页（零构建、零依赖）：
+
+- **语言**：自动检测浏览器语言，也可手动切换（中文 / English / 日本語 / Deutsch / Русский），
+  选择会记住并在下次访问恢复
+- **主题**：跟随系统 / 浅色 / 深色 三态循环切换（含 View Transitions 过渡），
+  系统主题变化时自动跟随
+- **动效**：循环类 —— 漂移光斑、呼吸光圈、火星上升、格式走马灯、手机底栏指示器、
+  播放进度与缩放 ping；非线性类 —— 弹簧平滑的 3D 卡片倾斜、指针视差、
+  指数缓动的数字增长、带回弹的入场与语言胶囊滑动
+- 图标与 OG 图由 `docs/favicon.svg` / `og-image.png` 提供，风格与应用图标一致
+  （光圈 + 火焰，MD3E 动态取色）
+
+推送 `docs/` 后由 `.github/workflows/pages.yml` 自动发布。首次使用需在
+**Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
+
+在线地址：<https://hotsteel2901.github.io/hotview/>
+
+---
+
 ## 仓库结构
 
 ```
