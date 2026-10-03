@@ -22,7 +22,14 @@ struct HotviewLogger {
 
 impl log::Log for HotviewLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Debug
+        let target = metadata.target();
+        // naga dumps whole overload tables at debug level; keep third-party
+        // noise out of the file, our own code stays verbose.
+        if target.starts_with("naga") || target.starts_with("wgpu") {
+            metadata.level() <= Level::Warn
+        } else {
+            metadata.level() <= Level::Debug
+        }
     }
 
     fn log(&self, record: &Record) {

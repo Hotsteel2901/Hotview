@@ -22,10 +22,11 @@ use ndk_sys::{
     AMediaExtractor_getSampleFlags, AMediaExtractor_getSampleTime,
     AMediaExtractor_getTrackCount, AMediaExtractor_getTrackFormat, AMediaExtractor_new,
     AMediaExtractor_readSampleData, AMediaExtractor_seekTo, AMediaExtractor_selectTrack,
-    AMediaExtractor_setDataSourceFd, AMediaFormat, AMediaFormat_delete, AMediaFormat_getInt32,
-    AMediaFormat_getInt64, AMediaFormat_getString, AMediaFormat_setInt32,
-    AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM, AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED,
-    AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED, AMEDIACODEC_INFO_TRY_AGAIN_LATER, SeekMode,
+    AMediaExtractor_setDataSource, AMediaExtractor_setDataSourceFd, AMediaFormat,
+    AMediaFormat_delete, AMediaFormat_getInt32, AMediaFormat_getInt64, AMediaFormat_getString,
+    AMediaFormat_setInt32, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM,
+    AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED, AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED,
+    AMEDIACODEC_INFO_TRY_AGAIN_LATER, SeekMode,
 };
 
 use crate::error::{HotviewError, Result};
@@ -102,6 +103,48 @@ fn format_int64(format: *mut AMediaFormat, key: &str) -> Option<i64> {
     unsafe {
         let mut out = 0i64;
         AMediaFormat_getInt64(format, cstr(key).as_ptr(), &mut out).then_some(out)
+    }
+}
+
+/// `openAssetFileDescriptor` reports `UNKNOWN_LENGTH` (-1) for most content
+/// providers, but `MediaExtractor` expects the real byte range.
+fn data_source_range(file: &File, offset: i64, length: i64) -> (i64, i64) {
+    let offset = offset.max(0);
+    if length > 0 {
+        return (offset, length);
+    }
+    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0) as i64;
+    (offset, (size - offset).max(0))
+}
+
+/// Point an extractor at our descriptor, retrying through `/proc/self/fd`
+/// when the descriptor route is rejected (some providers hand out pipes).
+unsafe fn open_extractor_data_source(
+    extractor: *mut AMediaExtractor,
+    file: &File,
+    fd: i32,
+    offset: i64,
+    length: i64,
+) -> Result<()> {
+    unsafe {
+        let (offset, length) = data_source_range(file, offset, length);
+        let status = AMediaExtractor_setDataSourceFd(extractor, fd, offset, length);
+        if status == media_status_t::AMEDIA_OK {
+            return Ok(());
+        }
+        log::warn!(
+            "extractor rejected fd data source ({}) for offset {offset} length {length}; retrying /proc/self/fd",
+            status.0
+        );
+        let path = cstr(&format!("/proc/self/fd/{fd}"));
+        let retry = AMediaExtractor_setDataSource(extractor, path.as_ptr());
+        if retry == media_status_t::AMEDIA_OK {
+            return Ok(());
+        }
+        Err(HotviewError::Video(format!(
+            "extractor could not open descriptor ({}, retry {})",
+            status.0, retry.0
+        )))
     }
 }
 
@@ -234,13 +277,11 @@ impl MediaCodecDecoder {
             if extractor.is_null() {
                 return Err(HotviewError::Video("could not create extractor".into()));
             }
-            let status = AMediaExtractor_setDataSourceFd(extractor, file.as_raw_fd(), offset, length);
-            if status != media_status_t::AMEDIA_OK {
+            if let Err(err) =
+                open_extractor_data_source(extractor, &file, file.as_raw_fd(), offset, length)
+            {
                 AMediaExtractor_delete(extractor);
-                return Err(HotviewError::Video(format!(
-                    "extractor could not open descriptor ({})",
-                    status.0
-                )));
+                return Err(err);
             }
             ExtractorPtr(extractor)
         };
@@ -738,14 +779,11 @@ impl MediaCodecAudioDecoder {
             if extractor.is_null() {
                 return Err(HotviewError::Video("could not create extractor".into()));
             }
-            let status =
-                AMediaExtractor_setDataSourceFd(extractor, file.as_raw_fd(), offset, length);
-            if status != media_status_t::AMEDIA_OK {
+            if let Err(err) =
+                open_extractor_data_source(extractor, &file, file.as_raw_fd(), offset, length)
+            {
                 AMediaExtractor_delete(extractor);
-                return Err(HotviewError::Video(format!(
-                    "audio extractor could not open descriptor ({})",
-                    status.0
-                )));
+                return Err(err);
             }
             ExtractorPtr(extractor)
         };
