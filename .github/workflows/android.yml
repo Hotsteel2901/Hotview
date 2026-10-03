@@ -1,17 +1,7 @@
 name: Android
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "android/**"
-      - "crates/**"
-      - ".github/workflows/android.yml"
-  pull_request:
-    paths:
-      - "android/**"
-      - "crates/**"
-      - ".github/workflows/android.yml"
+  # Manual only: run it from the Actions tab (or `gh workflow run android.yml`).
   workflow_dispatch:
 
 env:
@@ -60,6 +50,15 @@ jobs:
           if ! command -v cargo-ndk >/dev/null 2>&1; then
             cargo install cargo-ndk --locked
           fi
+
+      - name: Cache Android SDK (NDK / platform / build-tools)
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_HOME }}/platforms/android-${{ env.ANDROID_API }}.0
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+          key: android-sdk-${{ runner.os }}-${{ env.ANDROID_API }}-36.0.0-${{ env.NDK_VERSION }}
 
       - name: Install Android SDK packages
         run: |
@@ -145,6 +144,15 @@ jobs:
           if ! command -v cargo-ndk >/dev/null 2>&1; then
             cargo install cargo-ndk --locked
           fi
+
+      - name: Cache Android SDK (NDK / platform / build-tools)
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_HOME }}/platforms/android-${{ env.ANDROID_API }}.0
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+          key: android-sdk-${{ runner.os }}-${{ env.ANDROID_API }}-36.0.0-${{ env.NDK_VERSION }}
 
       - name: Install Android SDK packages
         run: |
