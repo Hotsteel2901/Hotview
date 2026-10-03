@@ -193,12 +193,18 @@ fn nv12_frame_is_drawn() {
 #[test]
 fn fit_transform_keeps_aspect_ratio() {
     // Portrait media inside a landscape surface: full height, centred width.
-    let transform = hotview_render::fit_transform((2000, 1000), (500, 1000), 1.0, [0.0, 0.0]);
+    let transform =
+        hotview_render::fit_transform((2000, 1000), (500, 1000), 1.0, [0.0, 0.0], false);
     assert!((transform[1] - 1.0).abs() < 1e-6);
     // 500 of 2000 px wide -> the quad covers a quarter of the NDC width.
     assert!((transform[0] - 0.25).abs() < 1e-6);
 
+    // Cover mode fills the surface instead of leaving bars.
+    let cover = hotview_render::fit_transform((2000, 1000), (500, 1000), 1.0, [0.0, 0.0], true);
+    assert!((cover[1] - 4.0).abs() < 1e-6);
+
     // Zooming never divides by zero.
-    let zoomed = hotview_render::fit_transform((1000, 1000), (500, 500), 3.0, [0.0, 0.0]);
+    let zoomed =
+        hotview_render::fit_transform((1000, 1000), (500, 500), 3.0, [0.0, 0.0], false);
     assert!((zoomed[0] - 3.0).abs() < 1e-6);
 }

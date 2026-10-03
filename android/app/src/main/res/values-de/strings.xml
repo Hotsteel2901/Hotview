@@ -86,4 +86,10 @@
     <string name="settings_loop">Videos wiederholen</string>
     <string name="settings_language">App-Sprache</string>
     <string name="settings_language_system">Systemsprache</string>
+    <string name="settings_keep_screen_on">Bildschirm beim Ansehen anlassen</string>
+    <string name="settings_grid_columns">Raster-Spalten</string>
+    <string name="settings_fit_mode">Anzeigemodus</string>
+    <string name="settings_fit_contain">Anpassen</string>
+    <string name="settings_fit_cover">Füllen</string>
+    <string name="settings_start_tab">Startansicht</string>
 </resources>

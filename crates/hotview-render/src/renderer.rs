@@ -565,17 +565,20 @@ fn write_plane(
     );
 }
 
-/// Compute the NDC transform for "contain" fitting plus user zoom/pan.
+/// Compute the NDC transform for "contain" (or "cover") fitting plus user
+/// zoom/pan.
 ///
 /// * `surface` – target size in pixels.
 /// * `media` – source size in pixels.
 /// * `user_scale` – 1.0 means fit, values above zoom in.
 /// * `pan_px` – translation in surface pixels, positive x right / y down.
+/// * `fill` – cover the surface instead of fitting inside it.
 pub fn fit_transform(
     surface: (u32, u32),
     media: (u32, u32),
     user_scale: f32,
     pan_px: [f32; 2],
+    fill: bool,
 ) -> [f32; 4] {
     if surface.0 == 0 || surface.1 == 0 || media.0 == 0 || media.1 == 0 {
         return [1.0, 1.0, 0.0, 0.0];
@@ -585,7 +588,11 @@ pub fn fit_transform(
     let mw = media.0 as f32;
     let mh = media.1 as f32;
 
-    let fit = (sw / mw).min(sh / mh);
+    let fit = if fill {
+        (sw / mw).max(sh / mh)
+    } else {
+        (sw / mw).min(sh / mh)
+    };
     let scale = (fit * user_scale).max(1e-5);
     let display = (mw * scale, mh * scale);
 

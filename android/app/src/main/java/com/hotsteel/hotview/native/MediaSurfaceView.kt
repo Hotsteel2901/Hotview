@@ -219,9 +219,9 @@ class MediaSurfaceView(context: Context) :
         if (current != 0L) runCatching { NativeBridge.setLooping(current, looping) }
     }
 
-    fun setViewport(scale: Float, panX: Float, panY: Float) {
+    fun setViewport(scale: Float, panX: Float, panY: Float, fill: Boolean) {
         val current = handle
-        if (current != 0L) runCatching { NativeBridge.setViewport(current, scale, panX, panY) }
+        if (current != 0L) runCatching { NativeBridge.setViewport(current, scale, panX, panY, fill) }
     }
 
     fun dispose() {

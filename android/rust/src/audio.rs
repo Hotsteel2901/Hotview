@@ -94,6 +94,7 @@ impl SpscRing {
 struct CallbackCtx {
     ring: Arc<SpscRing>,
     played_frames: Arc<AtomicU64>,
+    underruns: Arc<AtomicU64>,
     channels: usize,
 }
 
@@ -103,6 +104,7 @@ pub struct AaudioOutput {
     _ctx: Box<CallbackCtx>,
     ring: Arc<SpscRing>,
     played: Arc<AtomicU64>,
+    underruns: Arc<AtomicU64>,
     sample_rate: u32,
     channels: u16,
 }
@@ -115,9 +117,11 @@ impl AaudioOutput {
         let channels = channels.clamp(1, 2);
         let ring = Arc::new(SpscRing::new(sample_rate as usize * channels as usize));
         let played = Arc::new(AtomicU64::new(0));
+        let underruns = Arc::new(AtomicU64::new(0));
         let mut ctx = Box::new(CallbackCtx {
             ring: Arc::clone(&ring),
             played_frames: Arc::clone(&played),
+            underruns: Arc::clone(&underruns),
             channels: channels as usize,
         });
 
@@ -156,6 +160,7 @@ impl AaudioOutput {
                 _ctx: ctx,
                 ring,
                 played,
+                underruns,
                 sample_rate: actual_rate,
                 channels: actual_channels,
             })
@@ -183,6 +188,11 @@ impl AaudioOutput {
     /// Frames consumed by the audio device since the stream was created.
     pub fn played_frames(&self) -> u64 {
         self.played.load(Ordering::Relaxed)
+    }
+
+    /// Callbacks that ran out of samples (audible clicks when it keeps happening).
+    pub fn underruns(&self) -> u64 {
+        self.underruns.load(Ordering::Relaxed)
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -236,6 +246,7 @@ unsafe extern "C" fn data_callback(
             let written = ctx.ring.pop_into(dst);
             if written < count {
                 dst[written..].fill(0.0);
+                ctx.underruns.fetch_add(1, Ordering::Relaxed);
             }
             ctx.played_frames
                 .fetch_add(frames as u64, Ordering::Relaxed);

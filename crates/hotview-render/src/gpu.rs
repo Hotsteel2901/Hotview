@@ -34,6 +34,15 @@ impl GpuContext {
         }))
         .map_err(|err| format!("no compatible GPU adapter: {err}"))?;
 
+        let info = adapter.get_info();
+        log::info!(
+            "GPU adapter: {} ({:?}, {:?}, driver {})",
+            info.name,
+            info.backend,
+            info.device_type,
+            info.driver
+        );
+
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: Some("hotview-device"),
             required_features: wgpu::Features::empty(),

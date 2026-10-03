@@ -41,6 +41,7 @@ import com.hotsteel.hotview.ui.PhotosTab
 import com.hotsteel.hotview.ui.PickedTab
 import com.hotsteel.hotview.ui.SettingsScreen
 import com.hotsteel.hotview.ui.ViewerScreen
+import com.hotsteel.hotview.ui.rememberSettingsStore
 import com.hotsteel.hotview.ui.theme.HotviewTheme
 import com.hotsteel.hotview.ui.theme.rememberThemeController
 import com.hotsteel.hotview.ui.theme.next
@@ -58,8 +59,11 @@ fun HotviewApp(viewModel: GalleryViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val themeController = rememberThemeController()
+    val settings = rememberSettingsStore()
     var themeMode by remember { mutableStateOf(themeController.load()) }
-    var tab by rememberSaveable { mutableStateOf(RootTab.Albums) }
+    var tab by rememberSaveable {
+        mutableStateOf(RootTab.entries.getOrElse(settings.startTab) { RootTab.Albums })
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -114,6 +118,7 @@ fun HotviewApp(viewModel: GalleryViewModel = viewModel()) {
                     AlbumScreen(
                         title = screen.title,
                         items = album?.items.orEmpty(),
+                        columns = settings.gridColumns,
                         onBack = { viewModel.showAlbums() },
                         onOpen = { index ->
                             viewModel.openViewer(album?.items.orEmpty(), index)
@@ -161,11 +166,13 @@ fun HotviewApp(viewModel: GalleryViewModel = viewModel()) {
 
                                 RootTab.Photos -> PhotosTab(
                                     items = state.items,
+                                    columns = settings.gridColumns,
                                     onOpen = { index -> viewModel.openViewer(state.items, index) },
                                 )
 
                                 RootTab.Picked -> PickedTab(
                                     items = state.pickedItems,
+                                    columns = settings.gridColumns,
                                     onPick = launchPicker,
                                     onOpen = { index ->
                                         viewModel.openViewer(state.pickedItems, index)

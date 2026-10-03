@@ -46,6 +46,7 @@ pub enum Command {
     Viewport {
         scale: f32,
         pan: [f32; 2],
+        fill: bool,
     },
     SetPlaying(bool),
     Seek(i64),
@@ -99,6 +100,10 @@ struct PlaybackSession {
     /// PCM the ring was too full to accept last time; pushed first next round
     /// so no sample is ever dropped (dropped samples are audible clicks).
     audio_pending: Vec<f32>,
+    /// `(decoded, displayed, dropped)` frame counters.
+    stats: (u64, u64, u64),
+    /// `(when, decoded, displayed, dropped)` of the last stats log line.
+    stats_last: Option<(Instant, u64, u64, u64)>,
     last_pts_us: i64,
 }
 
@@ -159,6 +164,8 @@ impl PlaybackSession {
             wall_clock: None,
             audio_base: None,
             audio_pending: Vec::new(),
+            stats: (0, 0, 0),
+            stats_last: None,
             last_pts_us: 0,
         }
     }
@@ -179,13 +186,27 @@ impl PlaybackSession {
     }
 
     fn fill_video(&mut self, events: &Option<EventSink>) {
+        // Buffer up to ~32 megapixels (roughly a second of 720p): enough to
+        // absorb a bursty decoder, while 4K frames stay capped in memory.
+        const MAX_QUEUED_PIXELS: u64 = 32_000_000;
+        let mut queued: u64 = self
+            .frames
+            .iter()
+            .map(|frame| {
+                let (width, height) = frame.dimensions();
+                width as u64 * height as u64
+            })
+            .sum();
         let mut attempts = 0;
-        while self.frames.len() < 5 && attempts < 5 {
+        while queued < MAX_QUEUED_PIXELS && attempts < 8 {
             attempts += 1;
             match self.video.next_frame() {
                 Ok(DecodeOutcome::Frame(frame)) => {
+                    let (width, height) = frame.dimensions();
+                    queued += width as u64 * height as u64;
                     let pts = frame.pts_us().unwrap_or(self.last_pts_us);
                     self.last_pts_us = pts;
+                    self.stats.0 += 1;
                     self.frames.push_back(frame);
                 }
                 Ok(DecodeOutcome::Pending) => break,
@@ -299,12 +320,16 @@ impl PlaybackSession {
             let mut due_frame: Option<MediaFrame> = None;
             while let Some(front) = self.frames.front() {
                 if front.pts_us().unwrap_or(self.last_pts_us) <= position + 20_000 {
+                    if due_frame.is_some() {
+                        self.stats.2 += 1;
+                    }
                     due_frame = self.frames.pop_front();
                 } else {
                     break;
                 }
             }
             if let Some(frame) = due_frame {
+                self.stats.1 += 1;
                 self.display(frame, ctx, renderer, dirty, events);
             }
 
@@ -340,6 +365,33 @@ impl PlaybackSession {
             .position_us
             .store(self.clock_position().max(0), Ordering::Relaxed);
         shared.playing.store(self.playing, Ordering::Relaxed);
+
+        // Per-2s playback stats so on-device stutter can be quantified.
+        if self.playing
+            && self
+                .stats_last
+                .map(|(when, _, _, _)| when.elapsed() >= Duration::from_secs(2))
+                .unwrap_or(true)
+        {
+            let (decoded, displayed, dropped) = self.stats;
+            let (last_decoded, last_displayed, last_dropped) = self
+                .stats_last
+                .map(|(_, decoded, displayed, dropped)| (decoded, displayed, dropped))
+                .unwrap_or((0, 0, 0));
+            let underruns = self
+                .output
+                .as_ref()
+                .map(|output| output.underruns())
+                .unwrap_or(0);
+            log::info!(
+                "playback 2s: decoded {}, displayed {}, dropped {}, audio underruns {}",
+                decoded - last_decoded,
+                displayed - last_displayed,
+                dropped - last_dropped,
+                underruns
+            );
+            self.stats_last = Some((Instant::now(), decoded, displayed, dropped));
+        }
     }
 
     fn seek(&mut self, position_us: i64, events: &Option<EventSink>) {
@@ -468,6 +520,7 @@ pub fn run(
     let mut session: Option<PlaybackSession> = None;
     let mut scale = 1.0f32;
     let mut pan = [0.0f32; 2];
+    let mut fill = false;
     let mut dirty = false;
 
     loop {
@@ -489,6 +542,7 @@ pub fn run(
                     &mut session,
                     &mut scale,
                     &mut pan,
+                    &mut fill,
                     &mut dirty,
                     &shared,
                     &events,
@@ -507,6 +561,7 @@ pub fn run(
                         &mut session,
                         &mut scale,
                         &mut pan,
+                        &mut fill,
                         &mut dirty,
                         &shared,
                         &events,
@@ -535,6 +590,7 @@ pub fn run(
                     renderer.frame_size(),
                     scale,
                     pan,
+                    fill,
                 );
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     render_frame(&ctx, state, renderer, transform, &events);
@@ -561,6 +617,7 @@ fn handle_command(
     session: &mut Option<PlaybackSession>,
     scale: &mut f32,
     pan: &mut [f32; 2],
+    fill: &mut bool,
     dirty: &mut bool,
     shared: &Shared,
     events: &Option<EventSink>,
@@ -699,9 +756,11 @@ fn handle_command(
         Command::Viewport {
             scale: new_scale,
             pan: new_pan,
+            fill: new_fill,
         } => {
             *scale = new_scale.max(0.05);
             *pan = new_pan;
+            *fill = new_fill;
             *dirty = true;
         }
         Command::SetPlaying(playing) => {
@@ -745,6 +804,7 @@ fn handle_command_guarded(
     session: &mut Option<PlaybackSession>,
     scale: &mut f32,
     pan: &mut [f32; 2],
+    fill: &mut bool,
     dirty: &mut bool,
     shared: &Shared,
     events: &Option<EventSink>,
@@ -760,6 +820,7 @@ fn handle_command_guarded(
             session,
             scale,
             pan,
+            fill,
             dirty,
             shared,
             events,

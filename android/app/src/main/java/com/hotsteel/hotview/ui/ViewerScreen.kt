@@ -134,6 +134,13 @@ fun ViewerScreen(
 
     ImmersiveSystemBars()
 
+    // The screen stays awake while a photo or video is open (configurable).
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(settings.keepScreenOn) {
+        rootView.keepScreenOn = settings.keepScreenOn
+        onDispose { rootView.keepScreenOn = false }
+    }
+
     // Android 17 hardens background audio: pause as soon as we are not visible.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -166,7 +173,7 @@ fun ViewerScreen(
         hasAudio = true
         positionMs = 0L
         durationMs = currentItem?.durationMs ?: 0L
-        currentView?.setViewport(1f, 0f, 0f)
+        currentView?.setViewport(1f, 0f, 0f, settings.fillScreen)
     }
 
     LaunchedEffect(pagerState.currentPage, currentView) {
@@ -224,6 +231,7 @@ fun ViewerScreen(
                     item = item,
                     active = page == pagerState.currentPage && !pagerState.isScrollInProgress,
                     autoPlay = settings.autoPlayVideo,
+                    fillScreen = settings.fillScreen,
                     onViewReady = { view ->
                         if (page == pagerState.currentPage) {
                             currentView = view
@@ -428,6 +436,7 @@ private fun ViewerPage(
     item: MediaItem,
     active: Boolean,
     autoPlay: Boolean,
+    fillScreen: Boolean,
     onViewReady: (MediaSurfaceView) -> Unit,
     onTap: () -> Unit,
     onError: (String) -> Unit,
@@ -466,9 +475,9 @@ private fun ViewerPage(
     }
 
     // Push the viewport to the native renderer every animation frame.
-    LaunchedEffect(Unit) {
-        snapshotFlow { zoom to pan }.collect { (scale, offset) ->
-            viewRef.value?.setViewport(scale, offset.x, offset.y)
+    LaunchedEffect(fillScreen) {
+        snapshotFlow { Triple(zoom, pan, fillScreen) }.collect { (scale, offset, fill) ->
+            viewRef.value?.setViewport(scale, offset.x, offset.y, fill)
         }
     }
 
@@ -518,7 +527,7 @@ private fun ViewerPage(
                         translationX = pan.x
                         translationY = pan.y
                     },
-                contentScale = ContentScale.Fit,
+                contentScale = if (fillScreen) ContentScale.Crop else ContentScale.Fit,
             )
         }
 

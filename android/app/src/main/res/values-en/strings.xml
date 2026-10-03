@@ -86,4 +86,10 @@
     <string name="settings_loop">Loop videos</string>
     <string name="settings_language">App language</string>
     <string name="settings_language_system">System default</string>
+    <string name="settings_keep_screen_on">Keep the screen on while viewing</string>
+    <string name="settings_grid_columns">Grid columns</string>
+    <string name="settings_fit_mode">Display mode</string>
+    <string name="settings_fit_contain">Fit</string>
+    <string name="settings_fit_cover">Fill</string>
+    <string name="settings_start_tab">Start screen</string>
 </resources>

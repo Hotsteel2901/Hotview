@@ -27,6 +27,7 @@ import com.hotsteel.hotview.R
 fun AlbumScreen(
     title: String,
     items: List<MediaItem>,
+    columns: Int,
     onBack: () -> Unit,
     onOpen: (Int) -> Unit,
 ) {
@@ -63,6 +64,7 @@ fun AlbumScreen(
     ) { padding ->
         MediaGrid(
             items = items,
+            columns = columns,
             onOpen = onOpen,
             modifier = Modifier.padding(padding),
             contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 32.dp),

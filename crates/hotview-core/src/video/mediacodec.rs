@@ -37,6 +37,37 @@ const COLOR_FORMAT_YUV420_PLANAR: i32 = 19;
 const COLOR_FORMAT_YUV420_SEMIPLANAR: i32 = 21;
 const COLOR_FORMAT_YUV420_FLEXIBLE: i32 = 0x7F42_0888;
 
+unsafe extern "C" {
+    /// bionic's `libdl`; `RTLD_DEFAULT` is a null handle.
+    fn dlsym(handle: *mut std::ffi::c_void, symbol: *const c_char) -> *mut std::ffi::c_void;
+}
+
+/// The component name of a codec (`c2.qti.av1.decoder` vs `c2.android.av1.decoder`).
+///
+/// `AMediaCodec_getName` is API 28+, so resolve it at runtime: API 26/27 keep
+/// running and the API 26 link stays valid.
+fn codec_name(codec: *mut AMediaCodec) -> Option<String> {
+    type GetNameFn = unsafe extern "C" fn(*mut AMediaCodec, *mut *mut c_char) -> media_status_t;
+    type ReleaseNameFn = unsafe extern "C" fn(*mut AMediaCodec, *mut c_char);
+
+    unsafe {
+        let get_name = dlsym(ptr::null_mut(), cstr("AMediaCodec_getName").as_ptr());
+        let release_name = dlsym(ptr::null_mut(), cstr("AMediaCodec_releaseName").as_ptr());
+        if get_name.is_null() || release_name.is_null() {
+            return None;
+        }
+        let get_name: GetNameFn = std::mem::transmute(get_name);
+        let release_name: ReleaseNameFn = std::mem::transmute(release_name);
+        let mut name: *mut c_char = ptr::null_mut();
+        if get_name(codec, &mut name) != media_status_t::AMEDIA_OK || name.is_null() {
+            return None;
+        }
+        let text = CStr::from_ptr(name).to_string_lossy().into_owned();
+        release_name(codec, name);
+        Some(text)
+    }
+}
+
 struct ExtractorPtr(*mut AMediaExtractor);
 
 // SAFETY: an extractor is only ever touched from the thread that owns the
@@ -343,6 +374,10 @@ impl MediaCodecDecoder {
                 })
         }
         .map(CodecPtr)?;
+
+        if let Some(name) = codec_name(codec.0) {
+            log::info!("video decoder component: {name}");
+        }
 
         unsafe {
             check(AMediaCodec_start(codec.0), "AMediaCodec_start")?;

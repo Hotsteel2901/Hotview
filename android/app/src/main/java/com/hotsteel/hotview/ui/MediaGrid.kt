@@ -71,6 +71,7 @@ fun ScreenHeader(
 @Composable
 fun MediaGrid(
     items: List<MediaItem>,
+    columns: Int,
     onOpen: (Int) -> Unit,
     modifier: Modifier = Modifier,
     header: (@Composable () -> Unit)? = null,
@@ -84,7 +85,7 @@ fun MediaGrid(
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 108.dp),
+        columns = GridCells.Fixed(columns.coerceIn(2, 4)),
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(3.dp),

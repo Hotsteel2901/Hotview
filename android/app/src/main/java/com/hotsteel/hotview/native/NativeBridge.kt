@@ -112,7 +112,7 @@ object NativeBridge {
     /** Upload platform-decoded RGBA pixels (e.g. HEIC fallback). */
     external fun setBitmap(handle: Long, buffer: ByteBuffer, width: Int, height: Int): Int
 
-    external fun setViewport(handle: Long, scale: Float, panX: Float, panY: Float)
+    external fun setViewport(handle: Long, scale: Float, panX: Float, panY: Float, fill: Boolean)
     external fun setPlaying(handle: Long, playing: Boolean)
     external fun isPlaying(handle: Long): Boolean
     external fun isPrepared(handle: Long): Boolean

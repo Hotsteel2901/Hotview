@@ -61,6 +61,10 @@ fun SettingsScreen(onBack: () -> Unit) {
     var softwareDecode by remember { mutableStateOf(settings.softwareDecode) }
     var autoPlay by remember { mutableStateOf(settings.autoPlayVideo) }
     var loop by remember { mutableStateOf(settings.loopVideos) }
+    var gridColumns by remember { mutableStateOf(settings.gridColumns) }
+    var keepScreenOn by remember { mutableStateOf(settings.keepScreenOn) }
+    var fillScreen by remember { mutableStateOf(settings.fillScreen) }
+    var startTab by remember { mutableStateOf(settings.startTab) }
 
     val localeManager = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -162,6 +166,54 @@ fun SettingsScreen(onBack: () -> Unit) {
                 ) {
                     loop = it
                     settings.loopVideos = it
+                }
+                SwitchRow(
+                    label = stringResource(R.string.settings_keep_screen_on),
+                    checked = keepScreenOn,
+                ) {
+                    keepScreenOn = it
+                    settings.keepScreenOn = it
+                }
+            }
+
+            SettingsCard {
+                SectionTitle(stringResource(R.string.settings_grid_columns))
+                Spacer(Modifier.height(8.dp))
+                SegmentedOptions(
+                    options = listOf("2" to "2", "3" to "3", "4" to "4"),
+                    selected = gridColumns.toString(),
+                ) { value ->
+                    gridColumns = value.toInt()
+                    settings.gridColumns = gridColumns
+                }
+
+                Spacer(Modifier.height(16.dp))
+                SectionTitle(stringResource(R.string.settings_fit_mode))
+                Spacer(Modifier.height(8.dp))
+                SegmentedOptions(
+                    options = listOf(
+                        "fit" to stringResource(R.string.settings_fit_contain),
+                        "fill" to stringResource(R.string.settings_fit_cover),
+                    ),
+                    selected = if (fillScreen) "fill" else "fit",
+                ) { value ->
+                    fillScreen = value == "fill"
+                    settings.fillScreen = fillScreen
+                }
+
+                Spacer(Modifier.height(16.dp))
+                SectionTitle(stringResource(R.string.settings_start_tab))
+                Spacer(Modifier.height(8.dp))
+                SegmentedOptions(
+                    options = listOf(
+                        "0" to stringResource(R.string.tabs_albums),
+                        "1" to stringResource(R.string.tabs_photos),
+                        "2" to stringResource(R.string.tabs_picked),
+                    ),
+                    selected = startTab.toString(),
+                ) { value ->
+                    startTab = value.toInt()
+                    settings.startTab = startTab
                 }
             }
 
@@ -279,5 +331,25 @@ private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean
             modifier = Modifier.weight(1f),
         )
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** A row of single-choice segmented buttons: `value to label` pairs. */
+@Composable
+private fun SegmentedOptions(
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(label, maxLines = 1)
+            }
+        }
     }
 }

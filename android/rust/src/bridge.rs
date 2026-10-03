@@ -368,6 +368,7 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setViewport
     scale: jfloat,
     pan_x: jfloat,
     pan_y: jfloat,
+    fill: jboolean,
 ) {
     caught(|| {
         let _ = send(
@@ -375,6 +376,7 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setViewport
             Command::Viewport {
                 scale,
                 pan: [pan_x, pan_y],
+                fill: fill != JNI_FALSE,
             },
         );
     })

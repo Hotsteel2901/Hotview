@@ -148,8 +148,14 @@ fun AlbumsTab(
 }
 
 @Composable
-fun PhotosTab(items: List<com.hotsteel.hotview.media.MediaItem>, onOpen: (Int) -> Unit) {    MediaGrid(
+fun PhotosTab(
+    items: List<com.hotsteel.hotview.media.MediaItem>,
+    columns: Int,
+    onOpen: (Int) -> Unit,
+) {
+    MediaGrid(
         items = items,
+        columns = columns,
         onOpen = onOpen,
         header = {
             ScreenHeader(
@@ -163,6 +169,7 @@ fun PhotosTab(items: List<com.hotsteel.hotview.media.MediaItem>, onOpen: (Int) -
 @Composable
 fun PickedTab(
     items: List<com.hotsteel.hotview.media.MediaItem>,
+    columns: Int,
     onPick: () -> Unit,
     onOpen: (Int) -> Unit,
 ) {
@@ -171,6 +178,7 @@ fun PickedTab(
     } else {
         MediaGrid(
             items = items,
+            columns = columns,
             onOpen = onOpen,
             header = {
                 ScreenHeader(

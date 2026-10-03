@@ -86,4 +86,10 @@
     <string name="settings_loop">動画をループ再生</string>
     <string name="settings_language">表示言語</string>
     <string name="settings_language_system">システムに従う</string>
+    <string name="settings_keep_screen_on">表示中は画面をオンのままにする</string>
+    <string name="settings_grid_columns">サムネイルの列数</string>
+    <string name="settings_fit_mode">表示モード</string>
+    <string name="settings_fit_contain">フィット</string>
+    <string name="settings_fit_cover">埋める</string>
+    <string name="settings_start_tab">起動時の画面</string>
 </resources>

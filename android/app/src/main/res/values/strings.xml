@@ -86,4 +86,10 @@
     <string name="settings_loop">循环播放</string>
     <string name="settings_language">界面语言</string>
     <string name="settings_language_system">跟随系统</string>
+    <string name="settings_keep_screen_on">观看时保持屏幕常亮</string>
+    <string name="settings_grid_columns">缩略图列数</string>
+    <string name="settings_fit_mode">画面比例</string>
+    <string name="settings_fit_contain">适应</string>
+    <string name="settings_fit_cover">填满</string>
+    <string name="settings_start_tab">启动时显示</string>
 </resources>
