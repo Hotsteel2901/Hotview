@@ -56,7 +56,13 @@ object NativeBridge {
         }
 
         try {
-            initLogger()
+            val logFile = runCatching {
+                val dir = context.getExternalFilesDir(null) ?: context.filesDir
+                val file = java.io.File(dir, "hotview.log")
+                if (file.length() > 512 * 1024) file.delete()
+                file.absolutePath
+            }.getOrNull()
+            initLogger(logFile)
         } catch (error: Throwable) {
             loaded = false
             loadError = error
@@ -70,7 +76,8 @@ object NativeBridge {
 
     fun isAvailable(): Boolean = loaded
 
-    external fun initLogger()
+    /** `path` is the file that mirrors logcat, or null to log to logcat only. */
+    external fun initLogger(path: String?)
 
     external fun createRenderer(
         surface: Surface,

@@ -1,17 +1,31 @@
 //! Sending playback events back to Kotlin through a global reference.
 
+use std::sync::Arc;
+
 use jni::objects::{GlobalRef, JValue};
 use jni::JavaVM;
 
 /// A Kotlin object implementing `com.hotsteel.hotview.native.NativeMediaEvents`.
 pub struct EventSink {
-    vm: JavaVM,
+    vm: Arc<JavaVM>,
     callback: GlobalRef,
 }
 
 impl EventSink {
     pub fn new(vm: JavaVM, callback: GlobalRef) -> Self {
-        Self { vm, callback }
+        Self {
+            vm: Arc::new(vm),
+            callback,
+        }
+    }
+
+    /// Cheap second handle to the same Kotlin callback. Used to report a
+    /// render-thread panic even after the sink has been moved into the thread.
+    pub fn clone_ref(&self) -> Self {
+        Self {
+            vm: Arc::clone(&self.vm),
+            callback: self.callback.clone(),
+        }
     }
 
     pub fn prepared(&self, duration_ms: i64) {

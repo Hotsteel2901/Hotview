@@ -49,6 +49,12 @@ jobs:
           workspaces: android/rust -> target
           key: android-${{ matrix.variant }}
 
+      # wgpu compiles WGSL at runtime, so a broken shader only shows up as a
+      # black screen on a device. Catch it here instead.
+      - name: Validate the WGSL shader
+        if: matrix.variant == 'debug'
+        run: cargo test -p hotview-render --test shader
+
       - name: Install cargo-ndk
         run: |
           if ! command -v cargo-ndk >/dev/null 2>&1; then

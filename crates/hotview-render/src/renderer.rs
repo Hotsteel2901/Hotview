@@ -22,9 +22,9 @@ struct Uniforms {
     /// `(scale_x, scale_y, offset_x, offset_y)` in NDC.
     transform: [f32; 4],
     /// YUV -> RGB rows: `rgb = row * (y, u, v) + row.w`.
-    row0: [f32; 4],
-    row1: [f32; 4],
-    row2: [f32; 4],
+    coeff0: [f32; 4],
+    coeff1: [f32; 4],
+    coeff2: [f32; 4],
 }
 
 impl Uniforms {
@@ -32,9 +32,9 @@ impl Uniforms {
         let rows = yuv_to_rgb_rows(yuv);
         Self {
             transform,
-            row0: rows[0],
-            row1: rows[1],
-            row2: rows[2],
+            coeff0: rows[0],
+            coeff1: rows[1],
+            coeff2: rows[2],
         }
     }
 }

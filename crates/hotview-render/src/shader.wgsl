@@ -1,11 +1,12 @@
 struct Uniforms {
     transform: vec4<f32>,
-    row0: vec4<f32>,
-    row1: vec4<f32>,
-    row2: vec4<f32>,
+    coeff0: vec4<f32>,
+    coeff1: vec4<f32>,
+    coeff2: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(0) var<uniform> uni: Uniforms;
+
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var tex0: texture_2d<f32>;
 @group(0) @binding(3) var tex1: texture_2d<f32>;
@@ -29,8 +30,8 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
     let p = positions[vi];
     var out: VsOut;
     out.pos = vec4<f32>(
-        p.x * u.transform.x + u.transform.z,
-        p.y * u.transform.y + u.transform.w,
+        p.x * uni.transform.x + uni.transform.z,
+        p.y * uni.transform.y + uni.transform.w,
         0.0,
         1.0,
     );
@@ -45,27 +46,27 @@ fn fs_rgba(in: VsOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_yuv_planar(in: VsOut) -> @location(0) vec4<f32> {
-    let y = textureSample(tex0, samp, in.uv).r;
-    let u = textureSample(tex1, samp, in.uv).r;
-    let v = textureSample(tex2, samp, in.uv).r;
-    let c = vec3<f32>(y, u, v);
+    let luma = textureSample(tex0, samp, in.uv).r;
+    let chroma_u = textureSample(tex1, samp, in.uv).r;
+    let chroma_v = textureSample(tex2, samp, in.uv).r;
+    let c = vec3<f32>(luma, chroma_u, chroma_v);
     return vec4<f32>(
-        dot(u.row0.xyz, c) + u.row0.w,
-        dot(u.row1.xyz, c) + u.row1.w,
-        dot(u.row2.xyz, c) + u.row2.w,
+        dot(uni.coeff0.xyz, c) + uni.coeff0.w,
+        dot(uni.coeff1.xyz, c) + uni.coeff1.w,
+        dot(uni.coeff2.xyz, c) + uni.coeff2.w,
         1.0,
     );
 }
 
 @fragment
 fn fs_yuv_semi(in: VsOut) -> @location(0) vec4<f32> {
-    let y = textureSample(tex0, samp, in.uv).r;
+    let luma = textureSample(tex0, samp, in.uv).r;
     let uv = textureSample(tex1, samp, in.uv).rg;
-    let c = vec3<f32>(y, uv.x, uv.y);
+    let c = vec3<f32>(luma, uv.x, uv.y);
     return vec4<f32>(
-        dot(u.row0.xyz, c) + u.row0.w,
-        dot(u.row1.xyz, c) + u.row1.w,
-        dot(u.row2.xyz, c) + u.row2.w,
+        dot(uni.coeff0.xyz, c) + uni.coeff0.w,
+        dot(uni.coeff1.xyz, c) + uni.coeff1.w,
+        dot(uni.coeff2.xyz, c) + uni.coeff2.w,
         1.0,
     );
 }

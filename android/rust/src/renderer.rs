@@ -402,6 +402,11 @@ struct SurfaceState {
     config: wgpu::SurfaceConfiguration,
     /// Must stay last: dropped after `surface`.
     _window: WindowRef,
+    /// Only the first acquire failure is logged, otherwise a stuck surface
+    /// would flood logcat every frame.
+    logged_failure: bool,
+    /// Set once the first frame actually reached the screen.
+    logged_success: bool,
 }
 
 /// Entry point of the render thread.
@@ -429,7 +434,7 @@ pub fn run(
         match rx.recv_timeout(timeout) {
             Ok(command) => {
                 let mut quit = false;
-                handle_command(
+                handle_command_guarded(
                     command,
                     &ctx,
                     &mut surface,
@@ -447,7 +452,7 @@ pub fn run(
                     break;
                 }
                 while let Ok(command) = rx.try_recv() {
-                    handle_command(
+                    handle_command_guarded(
                         command,
                         &ctx,
                         &mut surface,
@@ -478,14 +483,19 @@ pub fn run(
         }
 
         if dirty {
-            if let (Some(state), Some(renderer)) = (&surface, &mut renderer) {
+            if let (Some(state), Some(renderer)) = (&mut surface, &mut renderer) {
                 let transform = fit_transform(
                     (state.config.width, state.config.height),
                     renderer.frame_size(),
                     scale,
                     pan,
                 );
-                render_frame(&ctx, state, renderer, transform, &events);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    render_frame(&ctx, state, renderer, transform, &events);
+                }));
+                if let Err(payload) = result {
+                    report_panic(&events, "render frame", &*payload);
+                }
             }
             dirty = false;
         }
@@ -545,6 +555,9 @@ fn handle_command(
                         desired_maximum_frame_latency: 2,
                     };
                     new_surface.configure(&ctx.device, &config);
+                    log::info!(
+                        "surface attached: {width}x{height}, format {format:?}, alpha {alpha_mode:?}"
+                    );
                     let mut new_renderer = MediaRenderer::new(&ctx.device, format);
                     if let Some(frame) = pending_frame.take() {
                         new_renderer.set_frame(&ctx.device, &ctx.queue, &frame);
@@ -560,6 +573,8 @@ fn handle_command(
                         surface: new_surface,
                         config,
                         _window: WindowRef(window.0),
+                        logged_failure: false,
+                        logged_success: false,
                     });
                     *dirty = true;
                 }
@@ -586,6 +601,8 @@ fn handle_command(
             }
         }
         Command::SetFrame(frame) => {
+            let (frame_width, frame_height) = frame.dimensions();
+            log::info!("still frame set: {frame_width}x{frame_height}");
             if let Some(renderer) = renderer {
                 renderer.set_frame(&ctx.device, &ctx.queue, &frame);
                 shared.width.store(frame.dimensions().0, Ordering::Relaxed);
@@ -613,6 +630,12 @@ fn handle_command(
                 );
             }
             new_session.audio_eos = new_session.audio.is_none();
+            log::info!(
+                "video ready: {}x{}, {:.1}s, audio={has_audio}",
+                info.width,
+                info.height,
+                info.duration_us.unwrap_or(0) as f64 / 1e6
+            );
             *session = Some(new_session);
             shared
                 .duration_us
@@ -664,15 +687,81 @@ fn handle_command(
     }
 }
 
+/// Run one command, isolating panics so a single bad frame cannot kill the
+/// render thread silently.
+#[allow(clippy::too_many_arguments)]
+fn handle_command_guarded(
+    command: Command,
+    ctx: &GpuContext,
+    surface: &mut Option<SurfaceState>,
+    renderer: &mut Option<MediaRenderer>,
+    pending_frame: &mut Option<MediaFrame>,
+    session: &mut Option<PlaybackSession>,
+    scale: &mut f32,
+    pan: &mut [f32; 2],
+    dirty: &mut bool,
+    shared: &Shared,
+    events: &Option<EventSink>,
+    quit: &mut bool,
+) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        handle_command(
+            command,
+            ctx,
+            surface,
+            renderer,
+            pending_frame,
+            session,
+            scale,
+            pan,
+            dirty,
+            shared,
+            events,
+            quit,
+        );
+    }));
+    if let Err(payload) = result {
+        report_panic(events, "render command", &*payload);
+    }
+}
+
+/// Surface the payload of a caught panic to logcat/Kotlin instead of dying.
+fn report_panic(events: &Option<EventSink>, what: &str, payload: &(dyn std::any::Any + Send)) {
+    let detail = payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_string());
+    let message = format!("{what} panicked: {detail}");
+    log::error!("{message}");
+    if let Some(events) = events {
+        events.error(9, &message);
+    }
+}
+
+/// Log the first acquire failure only: a stuck surface would otherwise flood
+/// the log every frame.
+fn log_surface_issue(state: &mut SurfaceState, label: &str) {
+    if !state.logged_failure {
+        state.logged_failure = true;
+        log::warn!("surface acquire reported '{label}'");
+    }
+}
+
 fn render_frame(
     ctx: &GpuContext,
-    state: &SurfaceState,
+    state: &mut SurfaceState,
     renderer: &mut MediaRenderer,
     transform: [f32; 4],
     events: &Option<EventSink>,
 ) {
     match state.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(texture) => {
+            state.logged_failure = false;
+            if !state.logged_success {
+                state.logged_success = true;
+                log::info!("first frame presented");
+            }
             let view = texture
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
@@ -686,6 +775,7 @@ fn render_frame(
             ctx.queue.present(texture);
         }
         wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+            state.logged_failure = false;
             let view = texture
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
@@ -699,15 +789,22 @@ fn render_frame(
             ctx.queue.present(texture);
             state.surface.configure(&ctx.device, &state.config);
         }
-        wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+        wgpu::CurrentSurfaceTexture::Outdated => {
+            log_surface_issue(state, "outdated");
+            state.surface.configure(&ctx.device, &state.config);
+        }
+        wgpu::CurrentSurfaceTexture::Lost => {
+            log_surface_issue(state, "lost");
             state.surface.configure(&ctx.device, &state.config);
         }
         wgpu::CurrentSurfaceTexture::Validation => {
+            log_surface_issue(state, "validation");
             if let Some(events) = events {
                 events.error(4, "surface validation error");
             }
         }
-        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {}
+        wgpu::CurrentSurfaceTexture::Timeout => log_surface_issue(state, "timeout"),
+        wgpu::CurrentSurfaceTexture::Occluded => log_surface_issue(state, "occluded"),
     }
 }
 
@@ -718,14 +815,15 @@ pub fn spawn(
     shared: Arc<Shared>,
     events: Option<EventSink>,
 ) -> Option<JoinHandle<()>> {
+    let panic_events = events.as_ref().map(EventSink::clone_ref);
     std::thread::Builder::new()
         .name("hotview-render".into())
         .spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run(ctx, rx, shared, events);
             }));
-            if result.is_err() {
-                log::error!("lens render thread panicked");
+            if let Err(payload) = result {
+                report_panic(&panic_events, "render thread", &*payload);
             }
         })
         .ok()

@@ -1453,6 +1453,7 @@ dependencies = [
  "bytemuck",
  "hotview-core",
  "log",
+ "naga",
  "pollster 1.0.1",
  "raw-window-handle",
  "wgpu",

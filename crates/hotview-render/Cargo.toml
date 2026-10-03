@@ -18,3 +18,8 @@ wgpu = { version = "30", default-features = false, features = [
     "metal",
     "dx12",
 ] }
+
+[dev-dependencies]
+# Parses/validates shader.wgsl in tests — WGSL is compiled at runtime by wgpu,
+# so a broken shader would otherwise only fail on device.
+naga = { version = "30", features = ["wgsl-in"] }
