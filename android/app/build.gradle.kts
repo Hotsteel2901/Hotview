@@ -120,6 +120,8 @@ if (!skipRust) {
         workingDir = rootProject.file("rust")
         commandLine(
             "cargo", "ndk",
+            // minSdk 26: AAudio (libaaudio.so) only exists from API 26.
+            "--platform", "26",
             "-t", "arm64-v8a",
             "-t", "armeabi-v7a",
             "-t", "x86_64",
