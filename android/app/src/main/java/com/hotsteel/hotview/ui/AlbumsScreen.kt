@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -73,6 +74,7 @@ fun AlbumsTab(
     onOpenAll: () -> Unit,
     onPickPhotos: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenSettings: () -> Unit,
     onGrantAccess: () -> Unit,
 ) {
     LazyVerticalGrid(
@@ -88,6 +90,13 @@ fun AlbumsTab(
                 subtitle = stringResource(R.string.albums_subtitle, state.albums.size, state.items.size),
                 trailing = {
                     Row {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = stringResource(R.string.action_settings),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         IconButton(onClick = onOpenAbout) {
                             Icon(
                                 imageVector = Icons.Filled.Info,

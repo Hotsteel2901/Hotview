@@ -101,7 +101,13 @@ object NativeBridge {
     external fun setImageFile(handle: Long, fd: Int, offset: Long, length: Long): Int
 
     /** Decode a video through MediaCodec; returns one of the `STATUS_*` values. */
-    external fun setVideoFile(handle: Long, fd: Int, offset: Long, length: Long): Int
+    external fun setVideoFile(
+        handle: Long,
+        fd: Int,
+        offset: Long,
+        length: Long,
+        softwareDecoder: Boolean,
+    ): Int
 
     /** Upload platform-decoded RGBA pixels (e.g. HEIC fallback). */
     external fun setBitmap(handle: Long, buffer: ByteBuffer, width: Int, height: Int): Int

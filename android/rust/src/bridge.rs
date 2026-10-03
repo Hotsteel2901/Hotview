@@ -278,6 +278,7 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setVideoFil
     fd: jint,
     offset: jlong,
     length: jlong,
+    software: jboolean,
 ) -> jint {
     caught(|| {
         let owned = unsafe { OwnedFd::from_raw_fd(fd) };
@@ -289,7 +290,7 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setVideoFil
                 None
             }
         };
-        match MediaCodecDecoder::open(owned, offset, length) {
+        match MediaCodecDecoder::open(owned, offset, length, software != JNI_FALSE) {
             Ok(video) => {
                 let audio = audio_fd.and_then(|fd| {
                     match MediaCodecAudioDecoder::open(fd, offset, length) {

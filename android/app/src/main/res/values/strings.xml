@@ -75,4 +75,15 @@
     <string name="about_contact_title">联系作者</string>
     <string name="about_credits_title">开源与致谢</string>
     <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+    <string name="action_settings">设置</string>
+    <string name="action_close">关闭</string>
+    <string name="settings_title">设置</string>
+    <string name="settings_decoder">视频解码器</string>
+    <string name="settings_decoder_hardware">硬件解码</string>
+    <string name="settings_decoder_software">软件解码</string>
+    <string name="settings_decoder_hint">硬件解码更快更省电（默认）；软件解码兼容性更好，但高分辨率下可能掉帧。</string>
+    <string name="settings_auto_play">打开视频时自动播放</string>
+    <string name="settings_loop">循环播放</string>
+    <string name="settings_language">界面语言</string>
+    <string name="settings_language_system">跟随系统</string>
 </resources>

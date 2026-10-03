@@ -75,4 +75,15 @@
     <string name="about_contact_title">Контакты</string>
     <string name="about_credits_title">Открытый код и благодарности</string>
     <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+    <string name="action_settings">Настройки</string>
+    <string name="action_close">Закрыть</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_decoder">Видеодекодер</string>
+    <string name="settings_decoder_hardware">Аппаратный</string>
+    <string name="settings_decoder_software">Программный</string>
+    <string name="settings_decoder_hint">Аппаратное декодирование быстрее и экономичнее (по умолчанию). Программное совместимее, но может пропускать кадры при высоком разрешении.</string>
+    <string name="settings_auto_play">Автовоспроизведение видео</string>
+    <string name="settings_loop">Повторять видео</string>
+    <string name="settings_language">Язык интерфейса</string>
+    <string name="settings_language_system">Как в системе</string>
 </resources>

@@ -75,4 +75,15 @@
     <string name="about_contact_title">Contact</string>
     <string name="about_credits_title">Open source &amp; credits</string>
     <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_close">Close</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_decoder">Video decoder</string>
+    <string name="settings_decoder_hardware">Hardware</string>
+    <string name="settings_decoder_software">Software</string>
+    <string name="settings_decoder_hint">Hardware decoding is faster and uses less power (default). Software decoding is more compatible but may drop frames at high resolutions.</string>
+    <string name="settings_auto_play">Autoplay videos</string>
+    <string name="settings_loop">Loop videos</string>
+    <string name="settings_language">App language</string>
+    <string name="settings_language_system">System default</string>
 </resources>

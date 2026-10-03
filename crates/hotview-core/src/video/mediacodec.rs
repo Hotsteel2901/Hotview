@@ -14,7 +14,7 @@ use std::ptr;
 
 use ndk_sys::{
     media_status_t, AMediaCodec, AMediaCodecBufferInfo, AMediaCodec_configure,
-    AMediaCodec_createDecoderByType, AMediaCodec_dequeueInputBuffer,
+    AMediaCodec_createCodecByName, AMediaCodec_createDecoderByType, AMediaCodec_dequeueInputBuffer,
     AMediaCodec_dequeueOutputBuffer, AMediaCodec_delete, AMediaCodec_flush,
     AMediaCodec_getInputBuffer, AMediaCodec_getOutputBuffer, AMediaCodec_getOutputFormat,
     AMediaCodec_queueInputBuffer, AMediaCodec_releaseOutputBuffer, AMediaCodec_start,
@@ -261,6 +261,9 @@ pub struct MediaCodecDecoder {
     color: YuvInfo,
     color_format: i32,
     geometry: Geometry,
+    /// True when the user asked for the AOSP software decoder: its "flexible"
+    /// output is planar I420, while hardware codecs hand out NV12.
+    software: bool,
     first_frame_logged: bool,
     input_done: bool,
     output_done: bool,
@@ -269,7 +272,7 @@ pub struct MediaCodecDecoder {
 
 impl MediaCodecDecoder {
     /// `fd` ownership is transferred; the decoder closes it when dropped.
-    pub fn open(fd: OwnedFd, offset: i64, length: i64) -> Result<Self> {
+    pub fn open(fd: OwnedFd, offset: i64, length: i64, software: bool) -> Result<Self> {
         let file = File::from(fd);
 
         let extractor = unsafe {
@@ -316,23 +319,28 @@ impl MediaCodecDecoder {
         let track_height = format_int32(track_format, "height").unwrap_or(0).max(0) as u32;
         let duration_us = format_int64(track_format, "durationUs");
 
-        // Ask for a colour layout we can parse (NV12 first, then I420). Some
-        // codecs refuse both, in which case we take their default (usually
-        // flexible) output.
+        // Ask for a colour layout we can parse. Software decoders natively
+        // produce planar I420, hardware decoders usually NV12.
+        let first_format = if software {
+            COLOR_FORMAT_YUV420_PLANAR
+        } else {
+            COLOR_FORMAT_YUV420_SEMIPLANAR
+        };
+        let second_format = if software {
+            COLOR_FORMAT_YUV420_SEMIPLANAR
+        } else {
+            COLOR_FORMAT_YUV420_PLANAR
+        };
         let codec = unsafe {
-            configure_codec(
-                &mime,
-                track_format,
-                Some(COLOR_FORMAT_YUV420_SEMIPLANAR),
-            )
-            .or_else(|_| {
-                let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
-                configure_codec(&mime, format, Some(COLOR_FORMAT_YUV420_PLANAR))
-            })
-            .or_else(|_| {
-                let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
-                configure_codec(&mime, format, None)
-            })
+            configure_codec(&mime, track_format, Some(first_format), software)
+                .or_else(|_| {
+                    let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
+                    configure_codec(&mime, format, Some(second_format), software)
+                })
+                .or_else(|_| {
+                    let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
+                    configure_codec(&mime, format, None, software)
+                })
         }
         .map(CodecPtr)?;
 
@@ -396,6 +404,7 @@ impl MediaCodecDecoder {
             color,
             color_format,
             geometry,
+            software,
             first_frame_logged: false,
             input_done: false,
             output_done: false,
@@ -489,7 +498,12 @@ impl MediaCodecDecoder {
             let chroma_height = (g.height / 2).max(1);
             let y = copy_rect(payload, g.stride, g.left, g.top, g.width, g.height);
 
-            let frame = if self.color_format == COLOR_FORMAT_YUV420_PLANAR {
+            let frame = if self.color_format == COLOR_FORMAT_YUV420_PLANAR
+                || (self.software && self.color_format == COLOR_FORMAT_YUV420_FLEXIBLE)
+            {
+                if self.software && self.color_format == COLOR_FORMAT_YUV420_FLEXIBLE {
+                    log::debug!("flexible YUV from the software decoder read as I420");
+                }
                 let chroma_stride = (g.stride / 2).max(1);
                 let chroma_rows = (g.slice_height / 2).max(1);
                 let u_at = y_size.min(payload.len());
@@ -619,15 +633,16 @@ unsafe fn configure_codec(
     mime: &str,
     format: *mut AMediaFormat,
     color_format: Option<i32>,
+    software: bool,
 ) -> Result<*mut AMediaCodec> {
     unsafe {
     if format.is_null() {
         return Err(HotviewError::Video("missing track format".into()));
     }
-    let codec = AMediaCodec_createDecoderByType(cstr(mime).as_ptr());
+    let codec = create_codec(mime, software);
     if codec.is_null() {
         AMediaFormat_delete(format);
-        return Err(HotviewError::Video(format!("no hardware decoder for {mime}")));
+        return Err(HotviewError::Video(format!("no decoder for {mime}")));
     }
     if let Some(color_format) = color_format {
         AMediaFormat_setInt32(format, cstr("color-format").as_ptr(), color_format);
@@ -643,6 +658,42 @@ unsafe fn configure_codec(
         )));
     }
     Ok(codec)
+    }
+}
+
+/// AOSP software decoder name for a mime type (`c2.android.*`, API 29+).
+fn software_decoder_for(mime: &str) -> Option<&'static str> {
+    Some(match mime {
+        "video/avc" => "c2.android.avc.decoder",
+        "video/hevc" => "c2.android.hevc.decoder",
+        "video/av01" => "c2.android.av1.decoder",
+        "video/vp9" => "c2.android.vp9.decoder",
+        "video/vp8" => "c2.android.vp8.decoder",
+        "video/mp4v-es" => "c2.android.mpeg4.decoder",
+        "video/3gpp" => "c2.android.h263.decoder",
+        _ => return None,
+    })
+}
+
+/// Create the codec the user asked for, falling back to the platform default
+/// when the software decoder is missing.
+unsafe fn create_codec(mime: &str, software: bool) -> *mut AMediaCodec {
+    unsafe {
+        if software {
+            if let Some(name) = software_decoder_for(mime) {
+                let codec = AMediaCodec_createCodecByName(cstr(name).as_ptr());
+                if !codec.is_null() {
+                    log::info!("video decoder: software ({name})");
+                    return codec;
+                }
+                log::warn!(
+                    "software decoder {name} unavailable for {mime}; using the default decoder"
+                );
+            } else {
+                log::warn!("no known software decoder for {mime}; using the default decoder");
+            }
+        }
+        AMediaCodec_createDecoderByType(cstr(mime).as_ptr())
     }
 }
 
@@ -818,7 +869,7 @@ impl MediaCodecAudioDecoder {
             )?;
         }
 
-        let codec = unsafe { configure_codec(&mime, track_format, None) }.map(CodecPtr)?;
+        let codec = unsafe { configure_codec(&mime, track_format, None, false) }.map(CodecPtr)?;
         unsafe {
             check(AMediaCodec_start(codec.0), "AMediaCodec_start (audio)")?;
         }

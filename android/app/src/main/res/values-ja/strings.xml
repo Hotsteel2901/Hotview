@@ -75,4 +75,15 @@
     <string name="about_contact_title">連絡先</string>
     <string name="about_credits_title">オープンソースと謝辞</string>
     <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+    <string name="action_settings">設定</string>
+    <string name="action_close">閉じる</string>
+    <string name="settings_title">設定</string>
+    <string name="settings_decoder">動画デコーダー</string>
+    <string name="settings_decoder_hardware">ハードウェア</string>
+    <string name="settings_decoder_software">ソフトウェア</string>
+    <string name="settings_decoder_hint">ハードウェアデコードは高速で省電力です（既定）。ソフトウェアデコードは互換性が高い代わりに、高解像度ではコマ落ちすることがあります。</string>
+    <string name="settings_auto_play">動画を自動再生</string>
+    <string name="settings_loop">動画をループ再生</string>
+    <string name="settings_language">表示言語</string>
+    <string name="settings_language_system">システムに従う</string>
 </resources>

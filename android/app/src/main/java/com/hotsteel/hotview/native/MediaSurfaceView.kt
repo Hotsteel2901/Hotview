@@ -7,6 +7,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.hotsteel.hotview.R
 import com.hotsteel.hotview.media.MediaItem
+import com.hotsteel.hotview.ui.SettingsStore
 import java.nio.ByteBuffer
 
 /**
@@ -102,10 +103,11 @@ class MediaSurfaceView(context: Context) :
             reportNativeFailure(NativeBridge.loadFailure())
             return
         }
+        val softwareDecode = SettingsStore.from(context).softwareDecode
         val status = runCatching {
             open(item.uri) { fd, offset, length ->
                 if (item.isVideo) {
-                    NativeBridge.setVideoFile(handle, fd, offset, length)
+                    NativeBridge.setVideoFile(handle, fd, offset, length, softwareDecode)
                 } else {
                     NativeBridge.setImageFile(handle, fd, offset, length)
                 }

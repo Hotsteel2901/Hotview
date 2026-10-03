@@ -25,6 +25,7 @@ sealed interface Screen {
     data class AlbumDetail(val albumId: Long, val title: String) : Screen
     data object Viewer : Screen
     data object About : Screen
+    data object Settings : Screen
 }
 
 data class GalleryState(
@@ -97,6 +98,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun showAbout() {
         _state.update { it.copy(screen = Screen.About) }
+    }
+
+    fun showSettings() {
+        _state.update { it.copy(screen = Screen.Settings) }
     }
 
     fun addPicked(uris: List<Uri>) {

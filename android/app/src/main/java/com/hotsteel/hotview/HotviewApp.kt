@@ -39,6 +39,7 @@ import com.hotsteel.hotview.ui.AlbumsTab
 import com.hotsteel.hotview.ui.LiquidGlassBottomBar
 import com.hotsteel.hotview.ui.PhotosTab
 import com.hotsteel.hotview.ui.PickedTab
+import com.hotsteel.hotview.ui.SettingsScreen
 import com.hotsteel.hotview.ui.ViewerScreen
 import com.hotsteel.hotview.ui.theme.HotviewTheme
 import com.hotsteel.hotview.ui.theme.rememberThemeController
@@ -122,6 +123,8 @@ fun HotviewApp(viewModel: GalleryViewModel = viewModel()) {
 
                 is Screen.About -> AboutScreen(onBack = { viewModel.showAlbums() })
 
+                is Screen.Settings -> SettingsScreen(onBack = { viewModel.showAlbums() })
+
                 is Screen.Albums -> {
                     Box(
                         Modifier
@@ -150,6 +153,7 @@ fun HotviewApp(viewModel: GalleryViewModel = viewModel()) {
                                     onOpenAll = { viewModel.openAll() },
                                     onPickPhotos = launchPicker,
                                     onOpenAbout = { viewModel.showAbout() },
+                                    onOpenSettings = { viewModel.showSettings() },
                                     onGrantAccess = {
                                         permissionLauncher.launch(requiredMediaPermissions())
                                     },

@@ -115,6 +115,7 @@ fun ViewerScreen(
         initialPage = initialIndex.coerceIn(0, items.lastIndex),
     ) { items.size }
     val currentItem = items.getOrNull(pagerState.currentPage)
+    val settings = rememberSettingsStore()
 
     var controlsVisible by remember { mutableStateOf(true) }
     var infoItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -122,7 +123,7 @@ fun ViewerScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
-    var looping by remember { mutableStateOf(false) }
+    var looping by remember { mutableStateOf(settings.loopVideos) }
     var hasAudio by remember { mutableStateOf(true) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var scrubValue by remember { mutableStateOf<Float?>(null) }
@@ -222,8 +223,12 @@ fun ViewerScreen(
                 ViewerPage(
                     item = item,
                     active = page == pagerState.currentPage && !pagerState.isScrollInProgress,
+                    autoPlay = settings.autoPlayVideo,
                     onViewReady = { view ->
-                        if (page == pagerState.currentPage) currentView = view
+                        if (page == pagerState.currentPage) {
+                            currentView = view
+                            view.setLooping(looping)
+                        }
                     },
                     onTap = { controlsVisible = !controlsVisible },
                     onError = { message ->
@@ -422,6 +427,7 @@ fun ViewerScreen(
 private fun ViewerPage(
     item: MediaItem,
     active: Boolean,
+    autoPlay: Boolean,
     onViewReady: (MediaSurfaceView) -> Unit,
     onTap: () -> Unit,
     onError: (String) -> Unit,
@@ -487,7 +493,7 @@ private fun ViewerPage(
                     viewRef.value = view
                     view.load(item)
                     if (item.isVideo) {
-                        if (active) view.play() else view.pause()
+                        if (active && autoPlay) view.play() else view.pause()
                     }
                 }
             },
@@ -516,10 +522,10 @@ private fun ViewerPage(
             )
         }
 
-        LaunchedEffect(active) {
+        LaunchedEffect(active, autoPlay) {
             val view = viewRef.value ?: return@LaunchedEffect
             if (item.isVideo) {
-                if (active) view.play() else view.pause()
+                if (active && autoPlay) view.play() else view.pause()
             }
         }
 
