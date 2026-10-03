@@ -75,11 +75,18 @@ jobs:
       - name: Build
         run: cargo build --release -p hotview-desktop
 
-      - name: Package
+      - name: Bundle FFmpeg dylibs
         run: |
+          brew install dylibbundler
           mkdir -p dist
           cp target/release/hotview dist/
           cp README.md LICENSE dist/
+          dylibbundler -od -b -x dist/hotview -d dist/libs \
+            -p @executable_path/libs/ \
+            -s /opt/homebrew/lib -s /usr/local/lib
+
+      - name: Package
+        run: |
           tar -C dist -czf hotview-macos-${{ matrix.arch }}.tar.gz .
 
       - uses: actions/upload-artifact@v7

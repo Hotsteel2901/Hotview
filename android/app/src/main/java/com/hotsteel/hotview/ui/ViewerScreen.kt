@@ -487,10 +487,19 @@ private fun ViewerPage(
         )
 
         fallback?.let { image ->
+            // Same zoom/pan interaction as the native renderer, applied in Compose
+            // so the platform fallback stays fully usable.
             Image(
                 bitmap = image,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = zoom
+                        scaleY = zoom
+                        translationX = pan.x
+                        translationY = pan.y
+                    },
                 contentScale = ContentScale.Fit,
             )
         }
