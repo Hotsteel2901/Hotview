@@ -36,12 +36,14 @@ jobs:
 
       - name: Build
         run: |
-          if ! cargo build --release -p hotview-desktop --color=never --message-format=short 2>&1 | tee build.log; then
-            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+          if ! cargo build --release -p hotview-desktop --color=never --message-format=short > build.log 2>&1; then
+            cat build.log
+            grep -E "error" build.log | head -n 25 | while IFS= read -r line; do
               echo "::error title=Compiler Error::$line"
             done
             exit 101
           fi
+          cat build.log
 
       - name: Package
         run: |
@@ -83,12 +85,14 @@ jobs:
 
       - name: Build
         run: |
-          if ! cargo build --release -p hotview-desktop --color=never --message-format=short 2>&1 | tee build.log; then
-            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+          if ! cargo build --release -p hotview-desktop --color=never --message-format=short > build.log 2>&1; then
+            cat build.log
+            grep -E "error" build.log | head -n 25 | while IFS= read -r line; do
               echo "::error title=Compiler Error::$line"
             done
             exit 101
           fi
+          cat build.log
 
       - name: Bundle FFmpeg dylibs
         run: |
@@ -143,12 +147,14 @@ jobs:
           PKG_CONFIG_PATH: C:\msys64\mingw64\lib\pkgconfig
         run: |
           export PATH="/c/msys64/mingw64/bin:$PATH"
-          if ! cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu --color=never --message-format=short 2>&1 | tee build.log; then
-            grep -E "error(\[E[0-9]+\])?:" build.log | head -n 25 | while IFS= read -r line; do
+          if ! cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu --color=never --message-format=short > build.log 2>&1; then
+            cat build.log
+            grep -E "error" build.log | head -n 25 | while IFS= read -r line; do
               echo "::error title=Compiler Error::$line"
             done
             exit 101
           fi
+          cat build.log
 
       - name: Package
         run: |
