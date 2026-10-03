@@ -201,8 +201,8 @@ impl AaudioOutput {
         self.ring.capacity().saturating_sub(self.ring.len())
     }
 
-    pub fn push(&self, samples: &[f32]) {
-        self.ring.push_slice(samples);
+    pub fn push(&self, samples: &[f32]) -> usize {
+        self.ring.push_slice(samples)
     }
 
     pub fn clear(&self) {

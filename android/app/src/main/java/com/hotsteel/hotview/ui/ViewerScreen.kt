@@ -429,6 +429,15 @@ private fun ViewerPage(
     val context = LocalContext.current
     val viewRef = remember { mutableStateOf<MediaSurfaceView?>(null) }
     var failure by remember(item.id) { mutableStateOf<String?>(null) }
+
+    // The pager preloads neighbouring pages, so a page's view only becomes the
+    // one the controls talk to when the page itself is active. Without this the
+    // progress bar kept polling the previous page's view (stuck position, dead
+    // seek) until the viewer was reopened.
+    val readyView = viewRef.value
+    LaunchedEffect(active, readyView) {
+        if (active && readyView != null) onViewReady(readyView)
+    }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
     var zoomTarget by remember(item.id) { mutableFloatStateOf(1f) }
     var smoothZoom by remember(item.id) { mutableStateOf(false) }
@@ -477,7 +486,6 @@ private fun ViewerPage(
                     }
                     viewRef.value = view
                     view.load(item)
-                    onViewReady(view)
                     if (item.isVideo) {
                         if (active) view.play() else view.pause()
                     }

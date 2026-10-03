@@ -96,6 +96,9 @@ struct PlaybackSession {
     first_frame_sent: bool,
     wall_clock: Option<(Instant, i64)>,
     audio_base: Option<(u64, i64)>,
+    /// PCM the ring was too full to accept last time; pushed first next round
+    /// so no sample is ever dropped (dropped samples are audible clicks).
+    audio_pending: Vec<f32>,
     last_pts_us: i64,
 }
 
@@ -155,6 +158,7 @@ impl PlaybackSession {
             first_frame_sent: false,
             wall_clock: None,
             audio_base: None,
+            audio_pending: Vec::new(),
             last_pts_us: 0,
         }
     }
@@ -212,15 +216,32 @@ impl PlaybackSession {
             self.audio_eos = true;
             return;
         };
-        // Keep about a second of PCM queued up.
+
+        // Push whatever the ring refused last time before decoding more.
+        if !self.audio_pending.is_empty() {
+            let written = output.push(&self.audio_pending);
+            if written >= self.audio_pending.len() {
+                self.audio_pending.clear();
+            } else {
+                self.audio_pending.drain(..written);
+                return;
+            }
+        }
+
+        // Keep about a second of PCM queued up. `push` reports how much the
+        // ring accepted; the remainder is kept for the next pump instead of
+        // being dropped (dropping mid-chunk is what made the audio crackle).
         let target = output.free_samples();
         let mut decoded = 0usize;
         while decoded < target {
             match audio.next_chunk() {
                 Ok(AudioOutcome::Samples(samples)) => {
-                    let written = samples.len();
-                    output.push(&samples);
+                    let written = output.push(&samples);
                     decoded += written;
+                    if written < samples.len() {
+                        self.audio_pending.extend_from_slice(&samples[written..]);
+                        break;
+                    }
                     if written == 0 {
                         break;
                     }
@@ -272,18 +293,19 @@ impl PlaybackSession {
 
         if self.playing {
             let position = self.clock_position();
-            loop {
-                let due = self
-                    .frames
-                    .front()
-                    .map(|frame| frame.pts_us().unwrap_or(self.last_pts_us) <= position + 20_000)
-                    .unwrap_or(false);
-                if !due {
+            // Show the newest frame that is due and drop stale ones: when the
+            // clock jumps ahead (or we were busy), catching up must not play
+            // the backlog back as a fast-forward burst.
+            let mut due_frame: Option<MediaFrame> = None;
+            while let Some(front) = self.frames.front() {
+                if front.pts_us().unwrap_or(self.last_pts_us) <= position + 20_000 {
+                    due_frame = self.frames.pop_front();
+                } else {
                     break;
                 }
-                if let Some(frame) = self.frames.pop_front() {
-                    self.display(frame, ctx, renderer, dirty, events);
-                }
+            }
+            if let Some(frame) = due_frame {
+                self.display(frame, ctx, renderer, dirty, events);
             }
 
             let audio_drained = self
@@ -337,6 +359,7 @@ impl PlaybackSession {
             output.clear();
         }
         self.frames.clear();
+        self.audio_pending.clear();
         self.position_us = position_us;
         self.last_pts_us = position_us;
         self.video_eos = false;
