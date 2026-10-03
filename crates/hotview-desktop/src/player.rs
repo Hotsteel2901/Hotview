@@ -205,13 +205,13 @@ impl AudioOutput {
             let config = supported.config();
             let stream = match supported.sample_format() {
                 cpal::SampleFormat::F32 => {
-                    Self::build_f32_stream(&device, &config, channels, shared)?
+                    Self::build_f32_stream(&device, config, channels, shared)?
                 }
                 cpal::SampleFormat::I16 => {
-                    Self::build_i16_stream(&device, &config, channels, shared)?
+                    Self::build_i16_stream(&device, config, channels, shared)?
                 }
                 cpal::SampleFormat::U16 => {
-                    Self::build_u16_stream(&device, &config, channels, shared)?
+                    Self::build_u16_stream(&device, config, channels, shared)?
                 }
                 _ => {
                     let stereo_cfg = cpal::StreamConfig {
@@ -219,7 +219,7 @@ impl AudioOutput {
                         sample_rate,
                         buffer_size: cpal::BufferSize::Default,
                     };
-                    Self::build_f32_stream(&device, &stereo_cfg, 2, shared)?
+                    Self::build_f32_stream(&device, stereo_cfg, 2, shared)?
                 }
             };
             let _ = stream.play();
@@ -234,7 +234,7 @@ impl AudioOutput {
             sample_rate: fallback_rate,
             buffer_size: cpal::BufferSize::Default,
         };
-        let stream = Self::build_f32_stream(&device, &config, 2, shared)?;
+        let stream = Self::build_f32_stream(&device, config, 2, shared)?;
         let _ = stream.play();
         Ok(Self {
             stream,
@@ -244,7 +244,7 @@ impl AudioOutput {
 
     fn build_f32_stream(
         device: &cpal::Device,
-        config: &cpal::StreamConfig,
+        config: cpal::StreamConfig,
         channels: usize,
         shared: Arc<AudioShared>,
     ) -> Result<cpal::Stream, String> {
@@ -273,7 +273,7 @@ impl AudioOutput {
 
     fn build_i16_stream(
         device: &cpal::Device,
-        config: &cpal::StreamConfig,
+        config: cpal::StreamConfig,
         channels: usize,
         shared: Arc<AudioShared>,
     ) -> Result<cpal::Stream, String> {
@@ -302,7 +302,7 @@ impl AudioOutput {
 
     fn build_u16_stream(
         device: &cpal::Device,
-        config: &cpal::StreamConfig,
+        config: cpal::StreamConfig,
         channels: usize,
         shared: Arc<AudioShared>,
     ) -> Result<cpal::Stream, String> {
