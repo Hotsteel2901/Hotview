@@ -9,6 +9,8 @@ env:
   # NDK r28c, the default of AGP 9.x.
   NDK_VERSION: "28.2.13676358"
   ANDROID_API: "37"
+  # SDK root of the GitHub-hosted Ubuntu images (used for cache paths).
+  ANDROID_SDK_ROOT_PATH: /usr/local/lib/android/sdk
 
 jobs:
   apk:
@@ -55,9 +57,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-            ${{ env.ANDROID_HOME }}/platforms/android-${{ env.ANDROID_API }}.0
-            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/platforms/android-${{ env.ANDROID_API }}.0
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/build-tools/36.0.0
           key: android-sdk-${{ runner.os }}-${{ env.ANDROID_API }}-36.0.0-${{ env.NDK_VERSION }}
 
       - name: Install Android SDK packages
@@ -92,9 +94,8 @@ jobs:
 
       - name: Build ${{ matrix.variant }} APK
         working-directory: android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
           if [ "${{ matrix.variant }}" = "release" ]; then
             ./gradlew --no-daemon :app:assembleRelease
           else
@@ -149,9 +150,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-            ${{ env.ANDROID_HOME }}/platforms/android-${{ env.ANDROID_API }}.0
-            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/platforms/android-${{ env.ANDROID_API }}.0
+            ${{ env.ANDROID_SDK_ROOT_PATH }}/build-tools/36.0.0
           key: android-sdk-${{ runner.os }}-${{ env.ANDROID_API }}-36.0.0-${{ env.NDK_VERSION }}
 
       - name: Install Android SDK packages
@@ -181,9 +182,9 @@ jobs:
 
       - name: Build release bundle
         working-directory: android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-        run: ./gradlew --no-daemon :app:bundleRelease
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
+          ./gradlew --no-daemon :app:bundleRelease
 
       - name: Upload AAB
         uses: actions/upload-artifact@v7
