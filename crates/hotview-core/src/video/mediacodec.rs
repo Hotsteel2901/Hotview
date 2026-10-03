@@ -19,7 +19,7 @@ use ndk_sys::{
     AMediaCodec_getInputBuffer, AMediaCodec_getOutputBuffer, AMediaCodec_getOutputFormat,
     AMediaCodec_queueInputBuffer, AMediaCodec_releaseOutputBuffer, AMediaCodec_start,
     AMediaCodec_stop, AMediaExtractor, AMediaExtractor_advance, AMediaExtractor_delete,
-    AMediaExtractor_getSampleFlags, AMediaExtractor_getSampleSize, AMediaExtractor_getSampleTime,
+    AMediaExtractor_getSampleFlags, AMediaExtractor_getSampleTime,
     AMediaExtractor_getTrackCount, AMediaExtractor_getTrackFormat, AMediaExtractor_new,
     AMediaExtractor_readSampleData, AMediaExtractor_seekTo, AMediaExtractor_selectTrack,
     AMediaExtractor_setDataSourceFd, AMediaFormat, AMediaFormat_delete, AMediaFormat_getInt32,
@@ -366,8 +366,9 @@ impl MediaCodecDecoder {
                 return Err(HotviewError::Video("codec returned a null input buffer".into()));
             }
 
-            let sample_size = AMediaExtractor_getSampleSize(self.extractor.0);
-            if sample_size < 0 {
+            let written = AMediaExtractor_readSampleData(self.extractor.0, buffer, capacity);
+            if written < 0 {
+                // No more samples: flush the codec with an end-of-stream flag.
                 AMediaCodec_queueInputBuffer(
                     self.codec.0,
                     index,
@@ -378,12 +379,6 @@ impl MediaCodecDecoder {
                 );
                 self.input_done = true;
                 return Ok(());
-            }
-
-            let to_read = (sample_size as usize).min(capacity);
-            let written = AMediaExtractor_readSampleData(self.extractor.0, buffer, to_read);
-            if written < 0 {
-                return Err(HotviewError::Video("could not read sample data".into()));
             }
             let pts = AMediaExtractor_getSampleTime(self.extractor.0);
             let flags = AMediaExtractor_getSampleFlags(self.extractor.0);
@@ -829,8 +824,8 @@ impl MediaCodecAudioDecoder {
                 return Err(HotviewError::Video("codec returned a null audio buffer".into()));
             }
 
-            let sample_size = AMediaExtractor_getSampleSize(self.extractor.0);
-            if sample_size < 0 {
+            let written = AMediaExtractor_readSampleData(self.extractor.0, buffer, capacity);
+            if written < 0 {
                 AMediaCodec_queueInputBuffer(
                     self.codec.0,
                     index,
@@ -841,12 +836,6 @@ impl MediaCodecAudioDecoder {
                 );
                 self.input_done = true;
                 return Ok(());
-            }
-
-            let to_read = (sample_size as usize).min(capacity);
-            let written = AMediaExtractor_readSampleData(self.extractor.0, buffer, to_read);
-            if written < 0 {
-                return Err(HotviewError::Video("could not read audio sample data".into()));
             }
             let pts = AMediaExtractor_getSampleTime(self.extractor.0).max(0);
             self.last_pts_us = pts;
