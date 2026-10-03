@@ -64,7 +64,17 @@ impl Player {
 
         let join = std::thread::Builder::new()
             .name("hotview-player".into())
-            .spawn(move || run(path, rx, event_tx))
+            .spawn(move || {
+                // Report worker panics instead of freezing the viewer.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run(path, rx, event_tx.clone())
+                }));
+                if result.is_err() {
+                    let _ = event_tx.send(PlayerEvent::Error(
+                        "player crashed while decoding this file".to_string(),
+                    ));
+                }
+            })
             .map_err(|err| err.to_string())?;
 
         Ok(Self {

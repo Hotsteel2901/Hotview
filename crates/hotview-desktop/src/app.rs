@@ -239,8 +239,10 @@ impl HotviewApp {
                 std::thread::Builder::new()
                     .name("hotview-image".into())
                     .spawn(move || {
-                        let result =
-                            decode_file_scaled(&path, 8192).map_err(|err| err.to_string());
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            decode_file_scaled(&path, 8192).map_err(|err| err.to_string())
+                        }))
+                        .unwrap_or_else(|_| Err("decoder crashed on this file".to_string()));
                         let _ = tx.send(result);
                     })
                     .ok();

@@ -111,10 +111,21 @@ fn fit_size(width: u32, height: u32, max_w: u32, max_h: u32) -> (u32, u32) {
     )
 }
 
+/// Hard ceiling that stops decompression bombs from taking the process down:
+/// at most ~512 MB of decoded pixels, plus sane dimension limits.
+fn decode_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(65_535);
+    limits.max_image_height = Some(65_535);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    limits
+}
+
 fn decode_reader<R: BufRead + Seek>(reader: R) -> Result<RgbaFrame> {
-    let reader = ImageReader::new(reader)
+    let mut reader = ImageReader::new(reader)
         .with_guessed_format()
         .map_err(|e| HotviewError::Image(e.to_string()))?;
+    reader.limits(decode_limits());
 
     let mut decoder = reader
         .into_decoder()

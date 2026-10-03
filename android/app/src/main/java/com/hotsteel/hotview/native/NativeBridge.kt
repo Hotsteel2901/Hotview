@@ -1,5 +1,6 @@
 package com.hotsteel.hotview.native
 
+import android.content.Context
 import android.view.Surface
 import java.nio.ByteBuffer
 
@@ -14,16 +15,60 @@ interface NativeMediaEvents {
 /**
  * Entry points into `libhotview_android.so`, the Rust renderer/decoder.
  * Matches `android/rust/src/bridge.rs`.
+ *
+ * The library is loaded lazily (with a second, absolute-path attempt) and any
+ * failure is kept as a readable message so the UI can explain what happened
+ * instead of dying with `ExceptionInInitializerError`/`NoClassDefFoundError`.
  */
 object NativeBridge {
     const val STATUS_OK = 0
     const val STATUS_FALLBACK = 1
     const val STATUS_ERROR = -1
 
-    init {
-        System.loadLibrary("hotview_android")
-        initLogger()
+    @Volatile
+    private var loadError: Throwable? = null
+
+    @Volatile
+    private var loaded = false
+
+    /** Idempotent: loads the native library once, remembering any failure. */
+    @Synchronized
+    fun ensureLoaded(context: Context): Boolean {
+        if (loaded) return true
+        if (loadError != null) return false
+
+        try {
+            System.loadLibrary("hotview_android")
+            loaded = true
+        } catch (libraryError: Throwable) {
+            // Some devices refuse to map libraries straight out of the APK;
+            // retry from the extracted native library directory.
+            val fallback = runCatching {
+                val dir = context.applicationInfo.nativeLibraryDir
+                System.load("$dir/libhotview_android.so")
+            }
+            if (fallback.isSuccess) {
+                loaded = true
+            } else {
+                loadError = libraryError
+                return false
+            }
+        }
+
+        try {
+            initLogger()
+        } catch (error: Throwable) {
+            loaded = false
+            loadError = error
+            return false
+        }
+        return true
     }
+
+    /** Non-null when the native library or the logger failed to initialise. */
+    fun loadFailure(): Throwable? = loadError
+
+    fun isAvailable(): Boolean = loaded
 
     external fun initLogger()
 
@@ -51,8 +96,8 @@ object NativeBridge {
     external fun setViewport(handle: Long, scale: Float, panX: Float, panY: Float)
     external fun setPlaying(handle: Long, playing: Boolean)
     external fun isPlaying(handle: Long): Boolean
-    external fun hasAudio(handle: Long): Boolean
     external fun isPrepared(handle: Long): Boolean
+    external fun hasAudio(handle: Long): Boolean
     external fun seekTo(handle: Long, positionMs: Long)
     external fun positionMs(handle: Long): Long
     external fun durationMs(handle: Long): Long

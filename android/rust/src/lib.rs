@@ -41,6 +41,28 @@ impl log::Log for LogcatLogger {
 
 static LOGGER: OnceLock<LogcatLogger> = OnceLock::new();
 
+/// Called by ART right after `dlopen`. Logging here proves whether the library
+/// actually loaded, even when the Kotlin side later fails to find a symbol.
+#[unsafe(no_mangle)]
+pub extern "system" fn JNI_OnLoad(
+    _vm: *mut jni::sys::JavaVM,
+    _reserved: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    logcat(
+        ndk_sys::android_LogPriority::ANDROID_LOG_INFO,
+        "Hotview native library loaded (JNI_OnLoad)",
+    );
+    jni::sys::JNI_VERSION_1_6
+}
+
+fn logcat(priority: ndk_sys::android_LogPriority, message: &str) {
+    let tag = CStr::from_bytes_with_nul(b"hotview\0").unwrap();
+    let text = format!("{message}\0");
+    unsafe {
+        ndk_sys::__android_log_write(priority.0 as i32, tag.as_ptr(), text.as_ptr() as *const c_char);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_initLogger(
     _env: jni::JNIEnv,

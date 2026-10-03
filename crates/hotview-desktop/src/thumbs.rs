@@ -29,7 +29,11 @@ impl ThumbnailLoader {
                 .name(format!("hotview-thumb-{index}"))
                 .spawn(move || {
                     while let Ok(path) = job_rx.recv() {
-                        let result = load_thumbnail(&path);
+                        // A decoder may panic on corrupt input; keep the pool alive.
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || load_thumbnail(&path),
+                        ))
+                        .unwrap_or_else(|_| Err("decoder crashed on this file".to_string()));
                         if results_tx.send((path, result)).is_err() {
                             break;
                         }

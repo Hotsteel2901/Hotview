@@ -87,6 +87,17 @@ import com.hotsteel.hotview.R
 import androidx.compose.animation.core.animate
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import com.hotsteel.hotview.native.PlatformDecode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -276,11 +287,14 @@ fun ViewerScreen(
         errorText?.let { message ->
             Text(
                 text = message,
-                color = Color(0xFFFF8A80),
-                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFFFD9D2),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .padding(24.dp),
+                    .padding(24.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
 
@@ -412,7 +426,9 @@ private fun ViewerPage(
     onTap: () -> Unit,
     onError: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     val viewRef = remember { mutableStateOf<MediaSurfaceView?>(null) }
+    var failure by remember(item.id) { mutableStateOf<String?>(null) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
     var zoomTarget by remember(item.id) { mutableFloatStateOf(1f) }
     var pan by remember(item.id) { mutableStateOf(Offset.Zero) }
@@ -437,11 +453,24 @@ private fun ViewerPage(
         }
     }
 
+    // When the native renderer cannot start, still show the picture by
+    // decoding it with the platform decoder.
+    val fallback by produceState<ImageBitmap?>(initialValue = null, item.uri, failure) {
+        if (failure != null && !item.isVideo) {
+            value = withContext(Dispatchers.IO) {
+                PlatformDecode.decode(context, item.uri)?.asImageBitmap()
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         AndroidView(
             factory = { context ->
                 MediaSurfaceView(context).also { view ->
-                    view.onErrorEvent = onError
+                    view.onErrorEvent = { message ->
+                        failure = message
+                        onError(message)
+                    }
                     viewRef.value = view
                     view.load(item)
                     onViewReady(view)
@@ -456,6 +485,15 @@ private fun ViewerPage(
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        fallback?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
 
         LaunchedEffect(active) {
             val view = viewRef.value ?: return@LaunchedEffect

@@ -2,16 +2,12 @@ package com.hotsteel.hotview.native
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.hotsteel.hotview.R
 import com.hotsteel.hotview.media.MediaItem
 import java.nio.ByteBuffer
-import kotlin.math.max
 
 /**
  * A `SurfaceView` whose contents are rendered by the Rust wgpu renderer.
@@ -19,8 +15,8 @@ import kotlin.math.max
  * Rust decoder does not know a format (HEIC), Kotlin decodes the image and
  * hands the RGBA buffer back to the renderer.
  *
- * Every native call is wrapped so a JNI problem degrades into an error message
- * instead of taking the process down.
+ * Native failures degrade into a readable message (and the Compose layer shows
+ * a platform-decoded image) instead of taking the process down.
  */
 class MediaSurfaceView(context: Context) :
     SurfaceView(context),
@@ -40,6 +36,10 @@ class MediaSurfaceView(context: Context) :
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        if (!NativeBridge.ensureLoaded(context)) {
+            reportNativeFailure(NativeBridge.loadFailure())
+            return
+        }
         val created = runCatching {
             if (handle == 0L) {
                 NativeBridge.createRenderer(
@@ -58,14 +58,7 @@ class MediaSurfaceView(context: Context) :
                 handle
             }
         }
-        created.onFailure { error ->
-            handle = 0L
-            post {
-                onErrorEvent?.invoke(
-                    context.getString(R.string.viewer_renderer_failed, error.javaClass.simpleName),
-                )
-            }
-        }
+        created.onFailure { error -> reportNativeFailure(error) }
         val newHandle = created.getOrNull() ?: 0L
         if (newHandle != 0L) {
             handle = newHandle
@@ -100,6 +93,10 @@ class MediaSurfaceView(context: Context) :
     }
 
     private fun loadInternal(item: MediaItem) {
+        if (!NativeBridge.ensureLoaded(context)) {
+            reportNativeFailure(NativeBridge.loadFailure())
+            return
+        }
         val status = runCatching {
             open(item.uri) { fd, offset, length ->
                 if (item.isVideo) {
@@ -120,6 +117,18 @@ class MediaSurfaceView(context: Context) :
         }
     }
 
+    private fun reportNativeFailure(error: Throwable?) {
+        handle = 0L
+        val detail = error?.message?.takeIf { it.isNotBlank() }
+            ?: error?.javaClass?.simpleName
+            ?: "unknown"
+        post {
+            onErrorEvent?.invoke(
+                context.getString(R.string.viewer_renderer_failed, detail),
+            )
+        }
+    }
+
     /**
      * Opens a content URI and hands the raw descriptor to Rust, which takes
      * ownership and closes it.
@@ -137,15 +146,7 @@ class MediaSurfaceView(context: Context) :
 
     private fun decodeWithPlatform(uri: Uri) {
         Thread {
-            val bitmap = try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    decodeWithImageDecoder(uri)
-                } else {
-                    decodeWithBitmapFactory(uri)
-                }
-            } catch (error: Throwable) {
-                null
-            }
+            val bitmap = PlatformDecode.decode(context, uri)
             if (bitmap != null && handle != 0L) {
                 val argb = if (bitmap.config == Bitmap.Config.ARGB_8888) {
                     bitmap
@@ -160,34 +161,6 @@ class MediaSurfaceView(context: Context) :
                 post { onErrorEvent?.invoke(context.getString(R.string.viewer_image_unsupported)) }
             }
         }.start()
-    }
-
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
-    private fun decodeWithImageDecoder(uri: Uri): Bitmap {
-        val source = ImageDecoder.createSource(context.contentResolver, uri)
-        return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            var sample = 1
-            while (max(info.size.width, info.size.height) / (sample * 2) >= 3072) {
-                sample *= 2
-            }
-            decoder.setTargetSampleSize(sample)
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-        }
-    }
-
-    private fun decodeWithBitmapFactory(uri: Uri): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
-        }
-        var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 3072) {
-            sample *= 2
-        }
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        return context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-        }
     }
 
     // ------------------------------------------------------------- controls
