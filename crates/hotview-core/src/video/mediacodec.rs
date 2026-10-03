@@ -1,8 +1,9 @@
 //! Android hardware video decoding through the NDK `MediaCodec` C API.
 //!
 //! This is the only "a little C" in the stack: the Rust core hands the codec a
-//! file descriptor, pulls `AImage` planes, normalises them to I420/NV12 and
-//! feeds them to the wgpu renderer.
+//! file descriptor, reads its raw I420/NV12 output buffers (honouring the
+//! `stride`/`slice-height`/`crop-*` geometry the codec reports) and feeds the
+//! normalised planes to the wgpu renderer.
 
 #![allow(non_upper_case_globals)]
 
@@ -12,10 +13,8 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::ptr;
 
 use ndk_sys::{
-    media_status_t, AImage, AImageCropRect, AImage_delete, AImage_getCropRect, AImage_getHeight,
-    AImage_getNumberOfPlanes, AImage_getPlaneData, AImage_getPlanePixelStride,
-    AImage_getPlaneRowStride, AImage_getWidth, AMediaCodec, AMediaCodecBufferInfo,
-    AMediaCodec_configure, AMediaCodec_createDecoderByType, AMediaCodec_dequeueInputBuffer,
+    media_status_t, AMediaCodec, AMediaCodecBufferInfo, AMediaCodec_configure,
+    AMediaCodec_createDecoderByType, AMediaCodec_dequeueInputBuffer,
     AMediaCodec_dequeueOutputBuffer, AMediaCodec_delete, AMediaCodec_flush,
     AMediaCodec_getInputBuffer, AMediaCodec_getOutputBuffer, AMediaCodec_getOutputFormat,
     AMediaCodec_queueInputBuffer, AMediaCodec_releaseOutputBuffer, AMediaCodec_start,
@@ -32,11 +31,6 @@ use ndk_sys::{
 use crate::error::{HotviewError, Result};
 use crate::frame::{ChromaLayout, ColorMatrix, ColorRange, MediaFrame, PlanarFrame, Plane, YuvInfo};
 use crate::video::{AudioDecoder, AudioOutcome, DecodeOutcome, VideoDecoder, VideoInfo};
-
-unsafe extern "C" {
-    /// Not exported by `ndk-sys` yet, but part of the stable NDK since API 21.
-    fn AMediaCodec_getOutputImage(codec: *mut AMediaCodec, index: usize) -> *mut AImage;
-}
 
 const COLOR_FORMAT_YUV420_PLANAR: i32 = 19;
 const COLOR_FORMAT_YUV420_SEMIPLANAR: i32 = 21;
@@ -111,55 +105,103 @@ fn format_int64(format: *mut AMediaFormat, key: &str) -> Option<i64> {
     }
 }
 
-/// A raw image plane as reported by `AImage`.
-struct RawPlane {
-    ptr: *const u8,
-    len: usize,
-    row_stride: usize,
-    pixel_stride: usize,
+/// How a codec lays out one raw output buffer.
+#[derive(Clone, Copy, Debug)]
+struct Geometry {
+    /// Bytes between two rows of the luma plane.
+    stride: usize,
+    /// Rows in the (possibly padded) luma plane.
+    slice_height: usize,
+    /// Visible area inside the padded buffer.
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
 }
 
-unsafe fn read_plane(image: *mut AImage, index: i32) -> Result<RawPlane> {
-    unsafe {
-    let mut data: *mut u8 = ptr::null_mut();
-    let mut len = 0i32;
-    check(
-        AImage_getPlaneData(image, index, &mut data, &mut len),
-        "AImage_getPlaneData",
-    )?;
-    let mut row_stride = 0i32;
-    check(
-        AImage_getPlaneRowStride(image, index, &mut row_stride),
-        "AImage_getPlaneRowStride",
-    )?;
-    let mut pixel_stride = 0i32;
-    check(
-        AImage_getPlanePixelStride(image, index, &mut pixel_stride),
-        "AImage_getPlanePixelStride",
-    )?;
-    Ok(RawPlane {
-        ptr: data,
-        len: len.max(0) as usize,
-        row_stride: row_stride.max(0) as usize,
-        pixel_stride: pixel_stride.max(1) as usize,
-    })
+impl Geometry {
+    /// Tightly packed fallback when the codec reports nothing better.
+    fn exact(width: u32, height: u32) -> Self {
+        let width = (width as usize).max(2);
+        let height = (height as usize).max(2);
+        Self {
+            stride: width,
+            slice_height: height,
+            left: 0,
+            top: 0,
+            width,
+            height,
+        }
     }
 }
 
-fn copy_rows(plane: &RawPlane, x: usize, y: usize, width_bytes: usize, height: usize) -> Vec<u8> {
-    let mut out = vec![0u8; width_bytes * height];
-    if plane.row_stride < x + width_bytes || plane.ptr.is_null() {
+/// Read `stride` / `slice-height` / `crop-*` from a codec output format.
+///
+/// Android reports the crop rectangle with inclusive right/bottom edges, and
+/// pads rows to `stride` bytes with `slice_height` rows per plane.
+fn read_geometry(format: *mut AMediaFormat, width: u32, height: u32) -> Geometry {
+    let mut geometry = Geometry::exact(width, height);
+    if format.is_null() {
+        return geometry;
+    }
+    if let Some(stride) = format_int32(format, "stride") {
+        if stride > 0 {
+            geometry.stride = stride as usize;
+        }
+    }
+    if let Some(slice) = format_int32(format, "slice-height") {
+        if slice > 0 {
+            geometry.slice_height = slice as usize;
+        }
+    }
+    geometry.stride = geometry.stride.max(2);
+    geometry.slice_height = geometry.slice_height.max(2);
+
+    let crop_left = format_int32(format, "crop-left").unwrap_or(0).max(0);
+    let crop_top = format_int32(format, "crop-top").unwrap_or(0).max(0);
+    let right = format_int32(format, "crop-right")
+        .map(|value| value.saturating_add(1))
+        .unwrap_or_else(|| crop_left.saturating_add(width as i32));
+    let bottom = format_int32(format, "crop-bottom")
+        .map(|value| value.saturating_add(1))
+        .unwrap_or_else(|| crop_top.saturating_add(height as i32));
+    let visible_width = right.saturating_sub(crop_left).max(0) as usize;
+    let visible_height = bottom.saturating_sub(crop_top).max(0) as usize;
+
+    if visible_width >= 2 && visible_height >= 2 {
+        let left = (crop_left as usize).min(geometry.stride - 2);
+        let top = (crop_top as usize).min(geometry.slice_height - 2);
+        geometry.left = left;
+        geometry.top = top;
+        geometry.width = visible_width.min(geometry.stride - left) & !1;
+        geometry.height = visible_height.min(geometry.slice_height - top) & !1;
+    }
+    if geometry.width < 2 || geometry.height < 2 {
+        geometry = Geometry::exact(width, height);
+    }
+    geometry
+}
+
+/// Copy the visible rectangle out of a (possibly padded) plane. Missing rows
+/// and columns stay zeroed instead of reading out of bounds.
+fn copy_rect(
+    src: &[u8],
+    row_stride: usize,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    let mut out = vec![0u8; width * height];
+    if row_stride == 0 {
         return out;
     }
     for row in 0..height {
-        let offset = (y + row) * plane.row_stride + x;
-        if offset + width_bytes > plane.len {
+        let src_off = (y + row) * row_stride + x;
+        if src_off + width > src.len() {
             break;
         }
-        unsafe {
-            let src = std::slice::from_raw_parts(plane.ptr.add(offset), width_bytes);
-            out[row * width_bytes..(row + 1) * width_bytes].copy_from_slice(src);
-        }
+        out[row * width..(row + 1) * width].copy_from_slice(&src[src_off..src_off + width]);
     }
     out
 }
@@ -175,6 +217,7 @@ pub struct MediaCodecDecoder {
     height: u32,
     color: YuvInfo,
     color_format: i32,
+    geometry: Geometry,
     input_done: bool,
     output_done: bool,
     last_pts_us: i64,
@@ -231,12 +274,22 @@ impl MediaCodecDecoder {
         let track_height = format_int32(track_format, "height").unwrap_or(0).max(0) as u32;
         let duration_us = format_int64(track_format, "durationUs");
 
-        // Configure with flexible YUV first; some devices reject that and need
-        // the codec's default byte-buffer format.
+        // Ask for a colour layout we can parse (NV12 first, then I420). Some
+        // codecs refuse both, in which case we take their default (usually
+        // flexible) output.
         let codec = unsafe {
-            configure_codec(&mime, track_format, true).or_else(|_| {
+            configure_codec(
+                &mime,
+                track_format,
+                Some(COLOR_FORMAT_YUV420_SEMIPLANAR),
+            )
+            .or_else(|_| {
                 let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
-                configure_codec(&mime, format, false)
+                configure_codec(&mime, format, Some(COLOR_FORMAT_YUV420_PLANAR))
+            })
+            .or_else(|_| {
+                let format = AMediaExtractor_getTrackFormat(extractor.0, track_index);
+                configure_codec(&mime, format, None)
             })
         }
         .map(CodecPtr)?;
@@ -245,7 +298,7 @@ impl MediaCodecDecoder {
             check(AMediaCodec_start(codec.0), "AMediaCodec_start")?;
         }
 
-        let (width, height, color, color_format) = unsafe {
+        let (width, height, color, color_format, geometry) = unsafe {
             let format = AMediaCodec_getOutputFormat(codec.0);
             let width = if format.is_null() {
                 track_width
@@ -262,11 +315,12 @@ impl MediaCodecDecoder {
             } else {
                 format_int32(format, "color-format").unwrap_or(COLOR_FORMAT_YUV420_FLEXIBLE)
             };
+            let geometry = read_geometry(format, width, height);
             let color = read_color_info(format, width, height);
             if !format.is_null() {
                 AMediaFormat_delete(format);
             }
-            (width, height, color, color_format)
+            (width, height, color, color_format, geometry)
         };
 
         if width == 0 || height == 0 {
@@ -289,6 +343,7 @@ impl MediaCodecDecoder {
             height,
             color,
             color_format,
+            geometry,
             input_done: false,
             output_done: false,
             last_pts_us: 0,
@@ -349,165 +404,102 @@ impl MediaCodecDecoder {
         Ok(())
     }
 
-    fn read_output_image(&mut self, index: usize, pts_us: i64) -> Result<MediaFrame> {
+    /// Normalise one raw codec buffer (I420 / NV12) into a tightly packed frame.
+    ///
+    /// The NDK `MediaCodec` C API does not hand out images, so the buffer is
+    /// plain memory whose layout comes from the output format keys `stride`,
+    /// `slice-height` and `crop-*` captured in `Geometry`.
+    unsafe fn read_output_buffer(
+        &self,
+        index: usize,
+        info: &AMediaCodecBufferInfo,
+        pts_us: i64,
+    ) -> Result<MediaFrame> {
         unsafe {
-            let image = AMediaCodec_getOutputImage(self.codec.0, index);
-            if image.is_null() {
-                return self.read_output_buffer(index, pts_us);
+            let mut size = 0usize;
+            let data = AMediaCodec_getOutputBuffer(self.codec.0, index, &mut size);
+            if data.is_null() || size == 0 {
+                return Err(HotviewError::Video("codec produced an empty buffer".into()));
             }
-            let result = self.image_to_frame(image, pts_us);
-            AImage_delete(image);
-            result
-        }
-    }
-
-    unsafe fn image_to_frame(&self, image: *mut AImage, pts_us: i64) -> Result<MediaFrame> {
-        unsafe {
-        let mut width = 0i32;
-        let mut height = 0i32;
-        check(AImage_getWidth(image, &mut width), "AImage_getWidth")?;
-        check(AImage_getHeight(image, &mut height), "AImage_getHeight")?;
-        if width <= 0 || height <= 0 {
-            return Err(HotviewError::Video("codec produced an empty frame".into()));
-        }
-
-        let mut crop = AImageCropRect {
-            left: 0,
-            top: 0,
-            right: width,
-            bottom: height,
-        };
-        AImage_getCropRect(image, &mut crop);
-        let left = crop.left.max(0) as usize;
-        let top = crop.top.max(0) as usize;
-        let vis_width = (crop.right - crop.left).max(0) as u32;
-        let vis_height = (crop.bottom - crop.top).max(0) as u32;
-        if vis_width == 0 || vis_height == 0 {
-            return Err(HotviewError::Video("codec produced an empty crop".into()));
-        }
-
-        let mut plane_count = 0i32;
-        check(
-            AImage_getNumberOfPlanes(image, &mut plane_count),
-            "AImage_getNumberOfPlanes",
-        )?;
-        let planes = (0..plane_count)
-            .map(|index| read_plane(image, index))
-            .collect::<Result<Vec<_>>>()?;
-        if planes.is_empty() {
-            return Err(HotviewError::Video("frame has no planes".into()));
-        }
-
-        let y = &planes[0];
-        let y_data = copy_rows(y, left, top, vis_width as usize, vis_height as usize);
-        let chroma_width = vis_width.div_ceil(2) as usize;
-        let chroma_height = vis_height.div_ceil(2) as usize;
-        let chroma_x = left / 2;
-        let chroma_y = top / 2;
-
-        let chroma = if planes.len() >= 3 {
-            let u = &planes[1];
-            let v = &planes[2];
-            if u.pixel_stride == 1 && v.pixel_stride == 1 {
-                let u_data = copy_rows(u, chroma_x, chroma_y, chroma_width, chroma_height);
-                let v_data = copy_rows(v, chroma_x, chroma_y, chroma_width, chroma_height);
-                ChromaLayout::Planar {
-                    u: Plane::new(u_data, chroma_width),
-                    v: Plane::new(v_data, chroma_width),
-                }
-            } else if u.pixel_stride == 2 {
-                let uv_data =
-                    copy_rows(u, chroma_x * 2, chroma_y, chroma_width * 2, chroma_height);
-                let vu = (v.ptr as usize) < (u.ptr as usize);
-                ChromaLayout::SemiPlanar {
-                    uv: Plane::new(uv_data, chroma_width * 2),
-                    vu,
-                }
-            } else {
-                return Err(HotviewError::Video("unsupported chroma layout".into()));
+            let offset = info.offset.max(0) as usize;
+            let byte_count = info.size.max(0) as usize;
+            if byte_count == 0 || offset + byte_count > size {
+                return Err(HotviewError::Video(
+                    "codec output buffer is out of range".into(),
+                ));
             }
-        } else if planes.len() == 2 {
-            let uv = &planes[1];
-            let uv_data = copy_rows(uv, chroma_x * 2, chroma_y, chroma_width * 2, chroma_height);
-            ChromaLayout::SemiPlanar {
-                uv: Plane::new(uv_data, chroma_width * 2),
-                vu: false,
+            let payload = std::slice::from_raw_parts(data.add(offset), byte_count);
+
+            let g = self.geometry;
+            if payload.len() < g.stride {
+                return Err(HotviewError::Video(
+                    "codec output buffer is shorter than one row".into(),
+                ));
             }
-        } else {
-            return Err(HotviewError::Video("unsupported packed frame layout".into()));
-        };
+            let y_size = g.stride.saturating_mul(g.slice_height);
+            let chroma_width = (g.width / 2).max(1);
+            let chroma_height = (g.height / 2).max(1);
+            let y = copy_rect(payload, g.stride, g.left, g.top, g.width, g.height);
 
-        Ok(MediaFrame::Planar(PlanarFrame {
-            width: vis_width,
-            height: vis_height,
-            y: Plane::new(y_data, vis_width as usize),
-            chroma,
-            info: self.color,
-            pts_us: Some(pts_us),
-        }))
-        }
-    }
-
-    /// Fallback for codecs that cannot hand out an `AImage`.
-    unsafe fn read_output_buffer(&self, index: usize, pts_us: i64) -> Result<MediaFrame> {
-        unsafe {
-        let mut size = 0usize;
-        let data = AMediaCodec_getOutputBuffer(self.codec.0, index, &mut size);
-        if data.is_null() || size == 0 {
-            return Err(HotviewError::Video("codec produced an empty buffer".into()));
-        }
-        let buffer = std::slice::from_raw_parts(data, size);
-        let (width, height) = (self.width as usize, self.height as usize);
-        let y_len = width * height;
-        let cw = width.div_ceil(2);
-        let ch = height.div_ceil(2);
-
-        let frame = match self.color_format {
-            COLOR_FORMAT_YUV420_PLANAR => {
-                if buffer.len() < y_len + 2 * cw * ch {
-                    return Err(HotviewError::Video("short planar buffer".into()));
-                }
-                let y = buffer[..y_len].to_vec();
-                let u = buffer[y_len..y_len + cw * ch].to_vec();
-                let v = buffer[y_len + cw * ch..y_len + 2 * cw * ch].to_vec();
+            let frame = if self.color_format == COLOR_FORMAT_YUV420_PLANAR {
+                let chroma_stride = (g.stride / 2).max(1);
+                let chroma_rows = (g.slice_height / 2).max(1);
+                let u_at = y_size.min(payload.len());
+                let v_at = (y_size + chroma_stride * chroma_rows).min(payload.len());
+                let u = copy_rect(
+                    &payload[u_at..],
+                    chroma_stride,
+                    g.left / 2,
+                    g.top / 2,
+                    chroma_width,
+                    chroma_height,
+                );
+                let v = copy_rect(
+                    &payload[v_at..],
+                    chroma_stride,
+                    g.left / 2,
+                    g.top / 2,
+                    chroma_width,
+                    chroma_height,
+                );
                 PlanarFrame {
-                    width: width as u32,
-                    height: height as u32,
-                    y: Plane::new(y, width),
+                    width: g.width as u32,
+                    height: g.height as u32,
+                    y: Plane::new(y, g.width),
                     chroma: ChromaLayout::Planar {
-                        u: Plane::new(u, cw),
-                        v: Plane::new(v, cw),
+                        u: Plane::new(u, chroma_width),
+                        v: Plane::new(v, chroma_width),
                     },
                     info: self.color,
                     pts_us: Some(pts_us),
                 }
-            }
-            COLOR_FORMAT_YUV420_SEMIPLANAR | COLOR_FORMAT_YUV420_FLEXIBLE => {
-                let uv_len = 2 * cw * ch;
-                if buffer.len() < y_len + uv_len {
-                    return Err(HotviewError::Video("short semi-planar buffer".into()));
+            } else {
+                if self.color_format != COLOR_FORMAT_YUV420_SEMIPLANAR
+                    && self.color_format != COLOR_FORMAT_YUV420_FLEXIBLE
+                {
+                    log::debug!("codec colour format {:#x} read as NV12", self.color_format);
                 }
-                let y = buffer[..y_len].to_vec();
-                let uv = buffer[y_len..y_len + uv_len].to_vec();
+                let uv = copy_rect(
+                    &payload[y_size.min(payload.len())..],
+                    g.stride,
+                    g.left & !1,
+                    g.top / 2,
+                    chroma_width * 2,
+                    chroma_height,
+                );
                 PlanarFrame {
-                    width: width as u32,
-                    height: height as u32,
-                    y: Plane::new(y, width),
+                    width: g.width as u32,
+                    height: g.height as u32,
+                    y: Plane::new(y, g.width),
                     chroma: ChromaLayout::SemiPlanar {
-                        uv: Plane::new(uv, cw * 2),
+                        uv: Plane::new(uv, chroma_width * 2),
                         vu: false,
                     },
                     info: self.color,
                     pts_us: Some(pts_us),
                 }
-            }
-            other => {
-                return Err(HotviewError::Video(format!(
-                    "unsupported codec colour format {other:#x}"
-                )))
-            }
-        };
-        Ok(MediaFrame::Planar(frame))
+            };
+            Ok(MediaFrame::Planar(frame))
         }
     }
 
@@ -528,7 +520,7 @@ impl MediaCodecDecoder {
             let frame = if eos {
                 None
             } else {
-                Some(self.read_output_image(index, pts_us)?)
+                Some(self.read_output_buffer(index, &buffer_info, pts_us)?)
             };
             AMediaCodec_releaseOutputBuffer(self.codec.0, index, false);
             return Ok(Some(match frame {
@@ -546,6 +538,13 @@ impl MediaCodecDecoder {
             if !format.is_null() {
                 self.color_format = format_int32(format, "color-format")
                     .unwrap_or(COLOR_FORMAT_YUV420_FLEXIBLE);
+                let width = format_int32(format, "width")
+                    .unwrap_or(self.width as i32)
+                    .max(0) as u32;
+                let height = format_int32(format, "height")
+                    .unwrap_or(self.height as i32)
+                    .max(0) as u32;
+                self.geometry = read_geometry(format, width, height);
                 self.color = read_color_info(format, self.width, self.height);
                 AMediaFormat_delete(format);
             }
@@ -562,7 +561,7 @@ impl MediaCodecDecoder {
 unsafe fn configure_codec(
     mime: &str,
     format: *mut AMediaFormat,
-    force_flexible: bool,
+    color_format: Option<i32>,
 ) -> Result<*mut AMediaCodec> {
     unsafe {
     if format.is_null() {
@@ -573,12 +572,8 @@ unsafe fn configure_codec(
         AMediaFormat_delete(format);
         return Err(HotviewError::Video(format!("no hardware decoder for {mime}")));
     }
-    if force_flexible {
-        AMediaFormat_setInt32(
-            format,
-            cstr("color-format").as_ptr(),
-            COLOR_FORMAT_YUV420_FLEXIBLE,
-        );
+    if let Some(color_format) = color_format {
+        AMediaFormat_setInt32(format, cstr("color-format").as_ptr(), color_format);
     }
     let status = AMediaCodec_configure(codec, format, ptr::null_mut(), ptr::null_mut(), 0);
     AMediaFormat_delete(format);
@@ -769,7 +764,7 @@ impl MediaCodecAudioDecoder {
             )?;
         }
 
-        let codec = unsafe { configure_codec(&mime, track_format, false) }.map(CodecPtr)?;
+        let codec = unsafe { configure_codec(&mime, track_format, None) }.map(CodecPtr)?;
         unsafe {
             check(AMediaCodec_start(codec.0), "AMediaCodec_start (audio)")?;
         }

@@ -1,10 +1,25 @@
 # Android targets: request 16 KB page alignment so the .so files run on
 # devices with 16 KB memory pages (required for apps targeting Android 15+).
+#
+# --no-undefined makes the linker reject any symbol that no NDK stub library
+# provides. Shared libraries may keep undefined symbols by default, which is
+# how a missing libmediandk/libaaudio link or a non-existent NDK export
+# (AMediaCodec_getOutputImage) previously slipped through to runtime dlopen
+# failures. Fail the build instead.
 [target.aarch64-linux-android]
-rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+rustflags = [
+    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+    "-C", "link-arg=-Wl,--no-undefined",
+]
 
 [target.armv7-linux-androideabi]
-rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+rustflags = [
+    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+    "-C", "link-arg=-Wl,--no-undefined",
+]
 
 [target.x86_64-linux-android]
-rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+rustflags = [
+    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+    "-C", "link-arg=-Wl,--no-undefined",
+]
