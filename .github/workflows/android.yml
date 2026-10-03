@@ -80,11 +80,16 @@ jobs:
           if [ -n "$KEYSTORE_DEBUG_B64" ]; then
             printf '%s' "$KEYSTORE_DEBUG_B64" | base64 -d > keystore/hotview-debug.jks
           fi
-          for name in hotview-release hotview-debug; do
-            if [ -f "keystore/$name.jks" ]; then
-              echo "found keystore/$name.jks"
-            fi
-          done
+          if [ -f keystore/hotview-release.jks ]; then
+            echo "HOTVIEW_KEYSTORE=keystore/hotview-release.jks" >> "$GITHUB_ENV"
+            echo "release keystore ready"
+          else
+            echo "no release keystore: falling back to the debug signature"
+          fi
+          if [ -f keystore/hotview-debug.jks ]; then
+            echo "HOTVIEW_DEBUG_KEYSTORE=keystore/hotview-debug.jks" >> "$GITHUB_ENV"
+            echo "debug keystore ready"
+          fi
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -172,6 +177,16 @@ jobs:
           fi
           if [ -n "$KEYSTORE_DEBUG_B64" ]; then
             printf '%s' "$KEYSTORE_DEBUG_B64" | base64 -d > keystore/hotview-debug.jks
+          fi
+          if [ -f keystore/hotview-release.jks ]; then
+            echo "HOTVIEW_KEYSTORE=keystore/hotview-release.jks" >> "$GITHUB_ENV"
+            echo "release keystore ready"
+          else
+            echo "no release keystore: falling back to the debug signature"
+          fi
+          if [ -f keystore/hotview-debug.jks ]; then
+            echo "HOTVIEW_DEBUG_KEYSTORE=keystore/hotview-debug.jks" >> "$GITHUB_ENV"
+            echo "debug keystore ready"
           fi
 
       - name: Set up Gradle
