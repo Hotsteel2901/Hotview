@@ -1181,15 +1181,15 @@ impl HotviewApp {
                     }
 
                     // Speed cycle button
-                    let speed_label = format!("{:.2}×", self.viewer.speed)
-                        .trim_end_matches('0')
-                        .trim_end_matches('.')
-                        .to_string()
-                        + if self.viewer.speed.fract() == 0.0 {
-                            ".0×"
-                        } else {
-                            "×"
-                        };
+                    let speed_label = match (self.viewer.speed * 100.0).round() as i32 {
+                        50 => "0.5×".to_string(),
+                        75 => "0.75×".to_string(),
+                        100 => "1.0×".to_string(),
+                        125 => "1.25×".to_string(),
+                        150 => "1.5×".to_string(),
+                        200 => "2.0×".to_string(),
+                        _ => format!("{:.2}×", self.viewer.speed),
+                    };
                     if ui
                         .button(speed_label)
                         .on_hover_text(tr.speed)

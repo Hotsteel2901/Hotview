@@ -284,7 +284,7 @@ impl VideoDecoder for FfmpegVideoDecoder {
         // `Input::seek` calls `avformat_seek_file` with stream_index = -1,
         // which expects timestamps in AV_TIME_BASE (microseconds).
         let target = position_us.max(0);
-        if self.input.seek(target, ..=target).is_err() {
+        if self.input.seek(target, ..target).is_err() {
             self.input
                 .seek(target, ..)
                 .map_err(|e| verr("seek", e))?;
@@ -467,7 +467,7 @@ impl FfmpegAudioDecoder {
 
     pub fn seek(&mut self, position_us: i64) -> Result<()> {
         let target = position_us.max(0);
-        if self.input.seek(target, ..=target).is_err() {
+        if self.input.seek(target, ..target).is_err() {
             self.input
                 .seek(target, ..)
                 .map_err(|e| verr("audio seek", e))?;

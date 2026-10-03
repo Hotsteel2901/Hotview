@@ -14,7 +14,7 @@ pub use image::{
     scale_to_fit, thumbnail, thumbnail_file,
 };
 pub use media::{
-    is_image_path, is_media_path, is_video_path, probe_path, MediaInfo, MediaKind, IMAGE_EXTENSIONS,
-    VIDEO_EXTENSIONS,
+    is_image_path, is_media_path, is_video_path, mime_from_path, probe_path, MediaInfo, MediaKind,
+    IMAGE_EXTENSIONS, VIDEO_EXTENSIONS,
 };
 pub use video::{DecodeOutcome, VideoDecoder, VideoInfo};
