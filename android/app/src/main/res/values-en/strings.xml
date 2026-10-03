@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotview</string>
+
+    <!-- Media store buckets -->
+    <string name="bucket_picked">Selected</string>
+    <string name="bucket_internal">Internal storage</string>
+    <string name="media_fallback_name">Media %d</string>
+    <string name="media_unnamed">Media</string>
+
+    <!-- Formatting -->
+    <string name="duration_unknown">--:--</string>
+    <string name="size_unknown">Unknown size</string>
+    <string name="resolution_unknown">Unknown resolution</string>
+
+    <!-- Root tabs -->
+    <string name="tabs_albums">Albums</string>
+    <string name="tabs_photos">Photos</string>
+    <string name="tabs_picked">Selected</string>
+
+    <!-- Albums -->
+    <string name="albums_subtitle">%1$d albums · %2$d items</string>
+    <string name="hero_all_photos">All photos</string>
+    <string name="hero_items_count">%d items</string>
+    <string name="hero_grant_hint">Tap to grant media access</string>
+    <string name="album_items_count">%d items</string>
+    <string name="picked_subtitle">%d items · from the system photo picker</string>
+
+    <!-- Access -->
+    <string name="access_partial_title">Partial photo access</string>
+    <string name="access_partial_message">You selected only some photos. Reselect or add more with the system photo picker.</string>
+    <string name="access_denied_title">No photo access</string>
+    <string name="access_denied_message">Grant photo and video access to browse your library, or pick individual items with the system photo picker first.</string>
+    <string name="action_reselect">Reselect</string>
+    <string name="action_grant">Grant access</string>
+    <string name="action_photo_picker">Photo picker</string>
+
+    <!-- Empty picked state -->
+    <string name="picked_empty_title">Nothing selected yet</string>
+    <string name="picked_empty_message">The system photo picker needs no storage permission — hand Hotview only the photos you choose.</string>
+    <string name="action_open_picker">Open photo picker</string>
+    <string name="action_add">Add</string>
+
+    <!-- Viewer -->
+    <string name="action_back">Back</string>
+    <string name="action_info">Info</string>
+    <string name="action_loop">Loop</string>
+    <string name="action_open_github">Open GitHub</string>
+    <string name="viewer_no_audio">No audio track</string>
+    <string name="viewer_video_unsupported">This video cannot be decoded (codec not supported on this device)</string>
+    <string name="viewer_image_unsupported">This image cannot be decoded</string>
+
+    <!-- Info sheet -->
+    <string name="info_type">Type</string>
+    <string name="info_video">Video</string>
+    <string name="info_image">Image</string>
+    <string name="info_resolution">Resolution</string>
+    <string name="info_size">Size</string>
+    <string name="info_format">Format</string>
+    <string name="info_duration">Duration</string>
+    <string name="info_date">Date</string>
+    <string name="info_album">Album</string>
+
+    <!-- Theme -->
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+
+    <!-- About -->
+    <string name="about_title">About</string>
+    <string name="about_author_subtitle">Author of Hotview · Indie developer</string>
+    <string name="about_version">Version %1$s · Apache-2.0</string>
+    <string name="about_description">A photo and video viewer built on a pure Rust core: decoding, colour conversion and wgpu rendering all happen in Rust, with MediaCodec hardware decoding and Vulkan rendering on Android.</string>
+    <string name="about_contact_title">Contact</string>
+    <string name="about_credits_title">Open source &amp; credits</string>
+    <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+</resources>

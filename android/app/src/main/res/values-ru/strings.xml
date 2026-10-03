@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotview</string>
+
+    <!-- Media store buckets -->
+    <string name="bucket_picked">Выбранные</string>
+    <string name="bucket_internal">Внутренняя память</string>
+    <string name="media_fallback_name">Медиа %d</string>
+    <string name="media_unnamed">Медиа</string>
+
+    <!-- Formatting -->
+    <string name="duration_unknown">--:--</string>
+    <string name="size_unknown">Размер неизвестен</string>
+    <string name="resolution_unknown">Разрешение неизвестно</string>
+
+    <!-- Root tabs -->
+    <string name="tabs_albums">Альбомы</string>
+    <string name="tabs_photos">Фото</string>
+    <string name="tabs_picked">Выбранные</string>
+
+    <!-- Albums -->
+    <string name="albums_subtitle">Альбомов: %1$d · элементов: %2$d</string>
+    <string name="hero_all_photos">Все фото</string>
+    <string name="hero_items_count">Элементов: %d</string>
+    <string name="hero_grant_hint">Нажмите, чтобы разрешить доступ к медиа</string>
+    <string name="album_items_count">Элементов: %d</string>
+    <string name="picked_subtitle">Элементов: %d · из системного выбора фото</string>
+
+    <!-- Access -->
+    <string name="access_partial_title">Частичный доступ к фото</string>
+    <string name="access_partial_message">Вы выбрали только часть фото. Выберите заново или добавьте их через системный выбор фото.</string>
+    <string name="access_denied_title">Нет доступа к фото</string>
+    <string name="access_denied_message">Разрешите доступ к фото и видео, чтобы просматривать галерею, или сначала выберите отдельные элементы через системный выбор фото.</string>
+    <string name="action_reselect">Выбрать заново</string>
+    <string name="action_grant">Разрешить доступ</string>
+    <string name="action_photo_picker">Выбор фото</string>
+
+    <!-- Empty picked state -->
+    <string name="picked_empty_title">Пока ничего не выбрано</string>
+    <string name="picked_empty_message">Системный выбор фото не требует разрешений — Hotview получает только выбранные вами снимки.</string>
+    <string name="action_open_picker">Открыть выбор фото</string>
+    <string name="action_add">Добавить</string>
+
+    <!-- Viewer -->
+    <string name="action_back">Назад</string>
+    <string name="action_info">Информация</string>
+    <string name="action_loop">Повтор</string>
+    <string name="action_open_github">Открыть GitHub</string>
+    <string name="viewer_no_audio">Нет аудиодорожки</string>
+    <string name="viewer_video_unsupported">Не удалось декодировать видео (кодек не поддерживается устройством)</string>
+    <string name="viewer_image_unsupported">Не удалось декодировать изображение</string>
+
+    <!-- Info sheet -->
+    <string name="info_type">Тип</string>
+    <string name="info_video">Видео</string>
+    <string name="info_image">Изображение</string>
+    <string name="info_resolution">Разрешение</string>
+    <string name="info_size">Размер</string>
+    <string name="info_format">Формат</string>
+    <string name="info_duration">Длительность</string>
+    <string name="info_date">Дата</string>
+    <string name="info_album">Альбом</string>
+
+    <!-- Theme -->
+    <string name="theme_system">Как в системе</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+
+    <!-- About -->
+    <string name="about_title">О приложении</string>
+    <string name="about_author_subtitle">Автор Hotview · независимый разработчик</string>
+    <string name="about_version">Версия %1$s · Apache-2.0</string>
+    <string name="about_description">Просмотрщик фото и видео с ядром на чистом Rust: декодирование, преобразование цвета и рендеринг на wgpu выполняются в Rust, а на Android используются аппаратный MediaCodec и Vulkan.</string>
+    <string name="about_contact_title">Контакты</string>
+    <string name="about_credits_title">Открытый код и благодарности</string>
+    <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+</resources>

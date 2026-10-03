@@ -1,0 +1,10 @@
+# Android targets: request 16 KB page alignment so the .so files run on
+# devices with 16 KB memory pages (required for apps targeting Android 15+).
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

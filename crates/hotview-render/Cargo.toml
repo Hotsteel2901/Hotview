@@ -1,0 +1,20 @@
+[package]
+name = "hotview-render"
+version = "0.1.0"
+edition = "2024"
+description = "wgpu renderer used by the Hotview Android viewer"
+license = "Apache-2.0"
+
+[dependencies]
+hotview-core = { path = "../hotview-core" }
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+pollster = "1.0"
+raw-window-handle = "0.6"
+wgpu = { version = "30", default-features = false, features = [
+    "wgsl",
+    "vulkan",
+    "gles",
+    "metal",
+    "dx12",
+] }

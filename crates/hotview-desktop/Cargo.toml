@@ -1,0 +1,27 @@
+[package]
+name = "hotview-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Cross-platform image & video viewer powered by a Rust core"
+license = "Apache-2.0"
+
+[[bin]]
+name = "hotview"
+path = "src/main.rs"
+
+[dependencies]
+hotview-core = { path = "../hotview-core", features = ["ffmpeg", "audio"] }
+anyhow = "1"
+crossbeam-channel = "0.5"
+eframe = { version = "0.36", default-features = false, features = [
+    "wgpu",
+    "default_fonts",
+    "x11",
+    "wayland",
+] }
+egui = "0.36"
+env_logger = "0.11"
+log = "0.4"
+rayon = "1.12"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
+cpal = "0.18"

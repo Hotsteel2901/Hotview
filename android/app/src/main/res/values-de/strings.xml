@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotview</string>
+
+    <!-- Media store buckets -->
+    <string name="bucket_picked">Ausgewählt</string>
+    <string name="bucket_internal">Interner Speicher</string>
+    <string name="media_fallback_name">Medium %d</string>
+    <string name="media_unnamed">Medium</string>
+
+    <!-- Formatting -->
+    <string name="duration_unknown">--:--</string>
+    <string name="size_unknown">Größe unbekannt</string>
+    <string name="resolution_unknown">Auflösung unbekannt</string>
+
+    <!-- Root tabs -->
+    <string name="tabs_albums">Alben</string>
+    <string name="tabs_photos">Fotos</string>
+    <string name="tabs_picked">Ausgewählt</string>
+
+    <!-- Albums -->
+    <string name="albums_subtitle">%1$d Alben · %2$d Elemente</string>
+    <string name="hero_all_photos">Alle Fotos</string>
+    <string name="hero_items_count">%d Elemente</string>
+    <string name="hero_grant_hint">Tippen, um Medienzugriff zu erlauben</string>
+    <string name="album_items_count">%d Elemente</string>
+    <string name="picked_subtitle">%d Elemente · aus der System-Fotoauswahl</string>
+
+    <!-- Access -->
+    <string name="access_partial_title">Teilweiser Fotozugriff</string>
+    <string name="access_partial_message">Du hast nur einige Fotos ausgewählt. Wähle erneut oder füge über die System-Fotoauswahl weitere hinzu.</string>
+    <string name="access_denied_title">Kein Fotozugriff</string>
+    <string name="access_denied_message">Erlaube den Zugriff auf Fotos und Videos, um deine Mediathek zu durchsuchen – oder wähle zuerst einzelne Elemente über die System-Fotoauswahl.</string>
+    <string name="action_reselect">Neu auswählen</string>
+    <string name="action_grant">Zugriff erlauben</string>
+    <string name="action_photo_picker">Fotoauswahl</string>
+
+    <!-- Empty picked state -->
+    <string name="picked_empty_title">Noch nichts ausgewählt</string>
+    <string name="picked_empty_message">Die System-Fotoauswahl benötigt keine Speicherberechtigung – Hotview erhält nur die von dir gewählten Fotos.</string>
+    <string name="action_open_picker">Fotoauswahl öffnen</string>
+    <string name="action_add">Hinzufügen</string>
+
+    <!-- Viewer -->
+    <string name="action_back">Zurück</string>
+    <string name="action_info">Info</string>
+    <string name="action_loop">Wiederholen</string>
+    <string name="action_open_github">GitHub öffnen</string>
+    <string name="viewer_no_audio">Keine Audiospur</string>
+    <string name="viewer_video_unsupported">Dieses Video kann nicht dekodiert werden (Codec auf diesem Gerät nicht unterstützt)</string>
+    <string name="viewer_image_unsupported">Dieses Bild kann nicht dekodiert werden</string>
+
+    <!-- Info sheet -->
+    <string name="info_type">Typ</string>
+    <string name="info_video">Video</string>
+    <string name="info_image">Bild</string>
+    <string name="info_resolution">Auflösung</string>
+    <string name="info_size">Größe</string>
+    <string name="info_format">Format</string>
+    <string name="info_duration">Dauer</string>
+    <string name="info_date">Datum</string>
+    <string name="info_album">Album</string>
+
+    <!-- Theme -->
+    <string name="theme_system">System</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+
+    <!-- About -->
+    <string name="about_title">Über</string>
+    <string name="about_author_subtitle">Autor von Hotview · Indie-Entwickler</string>
+    <string name="about_version">Version %1$s · Apache-2.0</string>
+    <string name="about_description">Ein Foto- und Videobetrachter mit reinem Rust-Kern: Dekodierung, Farbkonvertierung und wgpu-Rendering laufen in Rust, unter Android mit MediaCodec-Hardwaredekodierung und Vulkan.</string>
+    <string name="about_contact_title">Kontakt</string>
+    <string name="about_credits_title">Open Source &amp; Dank</string>
+    <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+</resources>

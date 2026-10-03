@@ -1,0 +1,36 @@
+# Rust
+/target
+**/target
+Cargo.lock
+!Cargo.lock
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/
+local.properties
+.gradle/
+.kotlin/
+android/.kotlin/
+*.apk
+*.aab
+
+# Signing material — never commit
+android/keystore.properties
+android/keystore/*.jks
+android/keystore/*.keystore
+*.jks
+*.keystore
+*.key
+*.p12
+*.pfx
+*.pem
+!android/keystore/README.md
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

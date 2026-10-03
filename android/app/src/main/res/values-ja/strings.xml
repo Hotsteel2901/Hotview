@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotview</string>
+
+    <!-- Media store buckets -->
+    <string name="bucket_picked">選択済み</string>
+    <string name="bucket_internal">内部ストレージ</string>
+    <string name="media_fallback_name">メディア %d</string>
+    <string name="media_unnamed">メディア</string>
+
+    <!-- Formatting -->
+    <string name="duration_unknown">--:--</string>
+    <string name="size_unknown">サイズ不明</string>
+    <string name="resolution_unknown">解像度不明</string>
+
+    <!-- Root tabs -->
+    <string name="tabs_albums">アルバム</string>
+    <string name="tabs_photos">写真</string>
+    <string name="tabs_picked">選択済み</string>
+
+    <!-- Albums -->
+    <string name="albums_subtitle">%1$d 個のアルバム · %2$d 個の項目</string>
+    <string name="hero_all_photos">すべての写真</string>
+    <string name="hero_items_count">%d 個の項目</string>
+    <string name="hero_grant_hint">タップしてメディアへのアクセスを許可</string>
+    <string name="album_items_count">%d 個の項目</string>
+    <string name="picked_subtitle">%d 個の項目 · システムのフォトピッカーから</string>
+
+    <!-- Access -->
+    <string name="access_partial_title">一部の写真のみアクセス可能</string>
+    <string name="access_partial_message">一部の写真のみを選択しました。再選択するか、システムのフォトピッカーで追加できます。</string>
+    <string name="access_denied_title">写真にアクセスできません</string>
+    <string name="access_denied_message">写真と動画へのアクセスを許可するとライブラリを閲覧できます。先にシステムのフォトピッカーで項目を選ぶこともできます。</string>
+    <string name="action_reselect">再選択</string>
+    <string name="action_grant">アクセスを許可</string>
+    <string name="action_photo_picker">フォトピッカー</string>
+
+    <!-- Empty picked state -->
+    <string name="picked_empty_title">まだ何も選択されていません</string>
+    <string name="picked_empty_message">システムのフォトピッカーはストレージ権限が不要で、選んだ写真だけを Hotview に渡します。</string>
+    <string name="action_open_picker">フォトピッカーを開く</string>
+    <string name="action_add">追加</string>
+
+    <!-- Viewer -->
+    <string name="action_back">戻る</string>
+    <string name="action_info">情報</string>
+    <string name="action_loop">ループ再生</string>
+    <string name="action_open_github">GitHub を開く</string>
+    <string name="viewer_no_audio">音声トラックなし</string>
+    <string name="viewer_video_unsupported">この動画はデコードできません（この端末では未対応のコーデックです）</string>
+    <string name="viewer_image_unsupported">この画像はデコードできません</string>
+
+    <!-- Info sheet -->
+    <string name="info_type">種類</string>
+    <string name="info_video">動画</string>
+    <string name="info_image">画像</string>
+    <string name="info_resolution">解像度</string>
+    <string name="info_size">サイズ</string>
+    <string name="info_format">形式</string>
+    <string name="info_duration">再生時間</string>
+    <string name="info_date">日時</string>
+    <string name="info_album">アルバム</string>
+
+    <!-- Theme -->
+    <string name="theme_system">システムに従う</string>
+    <string name="theme_light">ライト</string>
+    <string name="theme_dark">ダーク</string>
+
+    <!-- About -->
+    <string name="about_title">このアプリについて</string>
+    <string name="about_author_subtitle">Hotview の作者 · 個人開発者</string>
+    <string name="about_version">バージョン %1$s · Apache-2.0</string>
+    <string name="about_description">純粋な Rust で作られた写真・動画ビューア。デコード、色変換、wgpu レンダリングはすべて Rust コアで行われ、Android では MediaCodec のハードウェアデコードと Vulkan レンダリングを使用します。</string>
+    <string name="about_contact_title">連絡先</string>
+    <string name="about_credits_title">オープンソースと謝辞</string>
+    <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+</resources>

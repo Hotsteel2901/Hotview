@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hotview_background">#FAFAFC</color>
+    <color name="hotview_splash_background">#FAFAFC</color>
+</resources>

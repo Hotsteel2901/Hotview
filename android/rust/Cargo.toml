@@ -1,0 +1,23 @@
+[package]
+name = "hotview-android"
+version = "0.1.0"
+edition = "2024"
+description = "Android JNI bridge and render thread for the Hotview viewer"
+license = "Apache-2.0"
+
+[lib]
+name = "hotview_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+hotview-core = { path = "../../crates/hotview-core", features = ["mediacodec"] }
+hotview-render = { path = "../../crates/hotview-render" }
+jni = "0.21"
+log = "0.4"
+ndk-sys = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

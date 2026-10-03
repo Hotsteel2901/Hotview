@@ -1,0 +1,143 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "android/**"
+      - "**/*.md"
+  pull_request:
+    paths-ignore:
+      - "android/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libavcodec-dev libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev libavfilter-dev libavdevice-dev \
+            libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-x86_64
+
+      - name: Build
+        run: cargo build --release -p hotview-desktop
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/hotview dist/
+          cp README.md LICENSE dist/
+          tar -C dist -czf hotview-linux-x86_64.tar.gz .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hotview-linux-x86_64
+          path: hotview-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest      # Apple silicon
+            arch: arm64
+          - runner: macos-26-intel    # Intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install FFmpeg
+        run: |
+          brew install ffmpeg pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ matrix.arch }}
+
+      - name: Build
+        run: cargo build --release -p hotview-desktop
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/hotview dist/
+          cp README.md LICENSE dist/
+          tar -C dist -czf hotview-macos-${{ matrix.arch }}.tar.gz .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hotview-macos-${{ matrix.arch }}
+          path: hotview-macos-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install FFmpeg (MSYS2 / MinGW)
+        shell: cmd
+        run: C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-pkgconf"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x86_64-gnu
+
+      - name: Build
+        env:
+          PATH: C:\msys64\mingw64\bin;${{ env.PATH }}
+          PKG_CONFIG_PATH: C:\msys64\mingw64\lib\pkgconfig
+        run: cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu
+
+      - name: Package
+        env:
+          PATH: C:\msys64\mingw64\bin;${{ env.PATH }}
+        run: |
+          mkdir -p dist
+          cp target/x86_64-pc-windows-gnu/release/hotview.exe dist/
+          cp README.md LICENSE dist/
+          for dll in avcodec-*.dll avdevice-*.dll avfilter-*.dll avformat-*.dll avutil-*.dll swresample-*.dll swscale-*.dll; do
+            cp "C:/msys64/mingw64/bin/$dll" dist/ 2>/dev/null || true
+          done
+          for dll in libgcc_s_seh-1.dll libwinpthread-1.dll libstdc++-6.dll zlib1.dll bz2-1.dll lzma-5.dll iconv-2.dll; do
+            cp "C:/msys64/mingw64/bin/$dll" dist/ 2>/dev/null || true
+          done
+          7z a hotview-windows-x86_64.zip ./dist/*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hotview-windows-x86_64
+          path: hotview-windows-x86_64.zip
+          if-no-files-found: error

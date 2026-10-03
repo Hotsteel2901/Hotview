@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotview</string>
+
+    <!-- Media store buckets -->
+    <string name="bucket_picked">已选择</string>
+    <string name="bucket_internal">内部存储</string>
+    <string name="media_fallback_name">媒体 %d</string>
+    <string name="media_unnamed">媒体</string>
+
+    <!-- Formatting -->
+    <string name="duration_unknown">--:--</string>
+    <string name="size_unknown">未知大小</string>
+    <string name="resolution_unknown">未知分辨率</string>
+
+    <!-- Root tabs -->
+    <string name="tabs_albums">相册</string>
+    <string name="tabs_photos">照片</string>
+    <string name="tabs_picked">已选择</string>
+
+    <!-- Albums -->
+    <string name="albums_subtitle">%1$d 个相册 · %2$d 个项目</string>
+    <string name="hero_all_photos">全部照片</string>
+    <string name="hero_items_count">%d 个项目</string>
+    <string name="hero_grant_hint">轻点以授权访问媒体</string>
+    <string name="album_items_count">%d 项</string>
+    <string name="picked_subtitle">%d 个项目 · 来自系统照片选择器</string>
+
+    <!-- Access -->
+    <string name="access_partial_title">仅可访问部分照片</string>
+    <string name="access_partial_message">你选择了部分照片授权。可以重新选择，或使用系统照片选择器添加更多内容。</string>
+    <string name="access_denied_title">无法访问相册</string>
+    <string name="access_denied_message">授予照片和视频访问权限后即可浏览设备相册，也可以先用系统照片选择器挑选内容。</string>
+    <string name="action_reselect">重新选择</string>
+    <string name="action_grant">授予权限</string>
+    <string name="action_photo_picker">照片选择器</string>
+
+    <!-- Empty picked state -->
+    <string name="picked_empty_title">还没有选择任何内容</string>
+    <string name="picked_empty_message">系统照片选择器无需任何存储权限，只把你挑选的照片交给 Hotview。</string>
+    <string name="action_open_picker">打开照片选择器</string>
+    <string name="action_add">添加</string>
+
+    <!-- Viewer -->
+    <string name="action_back">返回</string>
+    <string name="action_info">信息</string>
+    <string name="action_loop">循环播放</string>
+    <string name="action_open_github">打开 GitHub</string>
+    <string name="viewer_no_audio">无音轨</string>
+    <string name="viewer_video_unsupported">无法解码该视频（设备可能不支持此编码格式）</string>
+    <string name="viewer_image_unsupported">无法解码该图片</string>
+
+    <!-- Info sheet -->
+    <string name="info_type">类型</string>
+    <string name="info_video">视频</string>
+    <string name="info_image">图片</string>
+    <string name="info_resolution">分辨率</string>
+    <string name="info_size">大小</string>
+    <string name="info_format">格式</string>
+    <string name="info_duration">时长</string>
+    <string name="info_date">时间</string>
+    <string name="info_album">相册</string>
+
+    <!-- Theme -->
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+
+    <!-- About -->
+    <string name="about_title">关于</string>
+    <string name="about_author_subtitle">Hotview 的作者 · 独立开发者</string>
+    <string name="about_version">版本 %1$s · Apache-2.0</string>
+    <string name="about_description">一个纯 Rust 打造的照片与视频查看器。解码、色彩转换和 wgpu 渲染全部在 Rust 核心完成，Android 端由 MediaCodec 硬件解码与 Vulkan 渲染驱动。</string>
+    <string name="about_contact_title">联系作者</string>
+    <string name="about_credits_title">开源与致谢</string>
+    <string name="about_made_with">Made with Rust + wgpu · © 2026 Hotsteel</string>
+</resources>
