@@ -84,6 +84,10 @@ jobs:
           dylibbundler -od -b -x dist/hotview -d dist/libs \
             -p @executable_path/libs/ \
             -s /opt/homebrew/lib -s /usr/local/lib
+          for dylib in dist/libs/*.dylib; do
+            [ -f "$dylib" ] && codesign --force --sign - "$dylib"
+          done
+          codesign --force --sign - dist/hotview
 
       - name: Package
         run: |
@@ -128,16 +132,27 @@ jobs:
 
       - name: Package
         run: |
-          export PATH="/c/msys64/mingw64/bin:$PATH"
+          export PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH"
           mkdir -p dist
           cp target/x86_64-pc-windows-gnu/release/hotview.exe dist/
           cp README.md LICENSE dist/
-          for dll in avcodec-*.dll avdevice-*.dll avfilter-*.dll avformat-*.dll avutil-*.dll swresample-*.dll swscale-*.dll; do
-            cp "C:/msys64/mingw64/bin/$dll" dist/ 2>/dev/null || true
+          for pattern in avcodec-*.dll avdevice-*.dll avfilter-*.dll avformat-*.dll avutil-*.dll swresample-*.dll swscale-*.dll; do
+            cp C:/msys64/mingw64/bin/$pattern dist/ 2>/dev/null || true
           done
-          for dll in libgcc_s_seh-1.dll libwinpthread-1.dll libstdc++-6.dll zlib1.dll bz2-1.dll lzma-5.dll iconv-2.dll; do
-            cp "C:/msys64/mingw64/bin/$dll" dist/ 2>/dev/null || true
+          while true; do
+            added=0
+            for bin in dist/*.exe dist/*.dll; do
+              [ -f "$bin" ] || continue
+              for dep in $(objdump -p "$bin" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
+                if [ ! -f "dist/$dep" ] && [ -f "C:/msys64/mingw64/bin/$dep" ]; then
+                  cp "C:/msys64/mingw64/bin/$dep" dist/
+                  added=1
+                fi
+              done
+            done
+            [ "$added" -eq 0 ] && break
           done
+          ls -la dist/avcodec-*.dll
           7z a hotview-windows-x86_64.zip ./dist/*
 
       - uses: actions/upload-artifact@v7

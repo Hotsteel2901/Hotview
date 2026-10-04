@@ -6,9 +6,9 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use ffmpeg_next as ffmpeg;
 use ffmpeg::format::Pixel;
 use ffmpeg::media::Type;
+use ffmpeg_next as ffmpeg;
 
 use crate::error::{HotviewError, Result};
 use crate::frame::{MediaFrame, RgbaFrame};
@@ -31,20 +31,20 @@ fn is_eagain(err: &ffmpeg::Error) -> bool {
     matches!(err, ffmpeg::Error::Other { errno } if *errno == ffmpeg::util::error::EAGAIN)
 }
 
-fn pts_to_us(pts: i64, time_base: ffmpeg::Rational) -> i64 {
-    let (num, den) = (time_base.numerator() as i128, time_base.denominator() as i128);
+fn pts_to_us(pts: i64, start_pts: i64, time_base: ffmpeg::Rational) -> i64 {
+    let (num, den) = (
+        time_base.numerator() as i128,
+        time_base.denominator() as i128,
+    );
     if den == 0 {
         return 0;
     }
-    (pts as i128 * num * 1_000_000 / den) as i64
-}
-
-fn us_to_pts(us: i64, time_base: ffmpeg::Rational) -> i64 {
-    let (num, den) = (time_base.numerator() as i128, time_base.denominator() as i128);
-    if num == 0 {
-        return 0;
-    }
-    (us as i128 * den / (num * 1_000_000)) as i64
+    let adjusted = if start_pts > 0 {
+        (pts - start_pts).max(0)
+    } else {
+        pts.max(0)
+    };
+    (adjusted as i128 * num * 1_000_000 / den) as i64
 }
 
 fn stream_fps(time_base: ffmpeg::Rational) -> Option<f64> {
@@ -55,6 +55,18 @@ fn stream_fps(time_base: ffmpeg::Rational) -> Option<f64> {
     (fps > 0.0 && fps < 1000.0).then_some(fps)
 }
 
+fn scaled_dimensions(width: u32, height: u32, max_dim: u32) -> (u32, u32) {
+    if max_dim == 0 || width.max(height) <= max_dim || width == 0 || height == 0 {
+        return (width, height);
+    }
+    let scale = (max_dim as f32 / width as f32)
+        .min(max_dim as f32 / height as f32)
+        .min(1.0);
+    let nw = ((width as f32 * scale).round() as u32).max(1);
+    let nh = ((height as f32 * scale).round() as u32).max(1);
+    (nw, nh)
+}
+
 /// Probe a video container.
 pub fn probe_video(path: &Path) -> Result<MediaInfo> {
     init()?;
@@ -63,7 +75,7 @@ pub fn probe_video(path: &Path) -> Result<MediaInfo> {
         .streams()
         .best(Type::Video)
         .ok_or(HotviewError::Unsupported)?;
-    let fps = stream_fps(stream.avg_frame_rate());
+    let fps = stream_fps(stream.avg_frame_rate()).or_else(|| stream_fps(stream.rate()));
     let duration_us = (input.duration() > 0).then(|| input.duration());
     let params = stream.parameters();
     let decoder = ffmpeg::codec::context::Context::from_parameters(params)
@@ -94,8 +106,15 @@ unsafe impl Send for SendScaler {}
 /// Used as a still-image fallback for formats like AVIF/HEIC/JPEG XL.
 #[cfg(feature = "ffmpeg")]
 pub fn first_frame_rgba(path: &Path) -> Result<RgbaFrame> {
+    first_frame_scaled(path, 0)
+}
+
+/// Decode and downscale the first frame directly inside `swscale` so that
+/// longest edge is at most `max_dim` pixels (`0` means original resolution).
+#[cfg(feature = "ffmpeg")]
+pub fn first_frame_scaled(path: &Path, max_dim: u32) -> Result<RgbaFrame> {
     use crate::video::VideoDecoder;
-    let mut decoder = FfmpegVideoDecoder::open(path)?;
+    let mut decoder = FfmpegVideoDecoder::open_scaled(path, max_dim)?;
     for _ in 0..240 {
         match decoder.next_frame()? {
             DecodeOutcome::Frame(frame) => return Ok(frame.to_rgba()),
@@ -112,6 +131,7 @@ pub struct FfmpegVideoDecoder {
     decoder: ffmpeg::decoder::Video,
     stream_index: usize,
     time_base: ffmpeg::Rational,
+    start_pts: i64,
     scaler: SendScaler,
     info: VideoInfo,
     eos: bool,
@@ -121,6 +141,10 @@ pub struct FfmpegVideoDecoder {
 
 impl FfmpegVideoDecoder {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_scaled(path, 0)
+    }
+
+    pub fn open_scaled(path: &Path, max_dim: u32) -> Result<Self> {
         init()?;
         let input = ffmpeg::format::input(path).map_err(|e| verr("open input", e))?;
         let stream = input
@@ -130,7 +154,8 @@ impl FfmpegVideoDecoder {
 
         let stream_index = stream.index();
         let time_base = stream.time_base();
-        let fps = stream_fps(stream.avg_frame_rate());
+        let start_pts = stream.start_time();
+        let fps = stream_fps(stream.avg_frame_rate()).or_else(|| stream_fps(stream.rate()));
         let duration_us = (input.duration() > 0).then(|| input.duration());
         let has_audio = input.streams().best(Type::Audio).is_some();
         let codec_id = stream.parameters().id();
@@ -147,13 +172,14 @@ impl FfmpegVideoDecoder {
             return Err(HotviewError::Video("empty video stream".into()));
         }
 
+        let (dst_w, dst_h) = scaled_dimensions(width, height, max_dim);
         let scaler = ffmpeg::software::scaling::Context::get(
             decoder.format(),
             width,
             height,
             Pixel::RGBA,
-            width,
-            height,
+            dst_w,
+            dst_h,
             ffmpeg::software::scaling::Flags::BILINEAR,
         )
         .map_err(|e| verr("scaler", e))?;
@@ -163,8 +189,10 @@ impl FfmpegVideoDecoder {
             decoder,
             stream_index,
             time_base,
+            start_pts,
             scaler: SendScaler(scaler),
-            info: VideoInfo {                width,
+            info: VideoInfo {
+                width,
                 height,
                 duration_us,
                 fps,
@@ -194,11 +222,14 @@ impl FfmpegVideoDecoder {
             data.extend_from_slice(&src[start..start + row_bytes]);
         }
 
+        let raw_pts = self.decoded.timestamp().or_else(|| self.decoded.pts());
+        let pts_us = raw_pts.map(|pts| pts_to_us(pts, self.start_pts, self.time_base));
+
         Ok(MediaFrame::Rgba(RgbaFrame {
             width,
             height,
             data,
-            pts_us: self.decoded.pts().map(|pts| pts_to_us(pts, self.time_base)),
+            pts_us,
         }))
     }
 
@@ -250,23 +281,26 @@ impl VideoDecoder for FfmpegVideoDecoder {
     }
 
     fn seek(&mut self, position_us: i64) -> Result<()> {
-        let target = us_to_pts(position_us, self.time_base);
-        self.input
-            .seek(target, ..)
-            .map_err(|e| verr("seek", e))?;
+        // `Input::seek` calls `avformat_seek_file` with stream_index = -1,
+        // which expects timestamps in AV_TIME_BASE (microseconds).
+        let target = position_us.max(0);
+        if self.input.seek(target, ..target).is_err() {
+            self.input
+                .seek(target, ..)
+                .map_err(|e| verr("seek", e))?;
+        }
         self.decoder.flush();
         self.eos = false;
         Ok(())
     }
 }
 
-/// Audio decoder that resamples everything to packed f32 stereo at 48 kHz.
+/// Audio decoder that resamples everything to packed f32 stereo.
 #[cfg(feature = "audio")]
 pub struct FfmpegAudioDecoder {
     input: ffmpeg::format::context::Input,
     decoder: ffmpeg::decoder::Audio,
     stream_index: usize,
-    time_base: ffmpeg::Rational,
     resampler: ffmpeg::software::resampling::Context,
     decoded: ffmpeg::frame::Audio,
     resampled: ffmpeg::frame::Audio,
@@ -283,14 +317,19 @@ impl FfmpegAudioDecoder {
 
     /// Returns `Ok(None)` when the file has no audio track.
     pub fn open(path: &Path) -> Result<Option<Self>> {
+        Self::open_with_rate(path, Self::OUTPUT_RATE)
+    }
+
+    /// Open an audio decoder outputting stereo f32 at `output_rate` Hz.
+    pub fn open_with_rate(path: &Path, output_rate: u32) -> Result<Option<Self>> {
         init()?;
+        let output_rate = output_rate.clamp(8_000, 192_000);
         let input = ffmpeg::format::input(path).map_err(|e| verr("open input", e))?;
         let Some(stream) = input.streams().best(Type::Audio) else {
             return Ok(None);
         };
 
         let stream_index = stream.index();
-        let time_base = stream.time_base();
         let params = stream.parameters();
         let decoder = ffmpeg::codec::context::Context::from_parameters(params)
             .map_err(|e| verr("decoder params", e))?
@@ -304,7 +343,7 @@ impl FfmpegAudioDecoder {
             decoder.rate(),
             ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
             ffmpeg::ChannelLayout::STEREO,
-            Self::OUTPUT_RATE,
+            output_rate,
         )
         .map_err(|e| verr("resampler", e))?;
 
@@ -312,13 +351,12 @@ impl FfmpegAudioDecoder {
             input,
             decoder,
             stream_index,
-            time_base,
             resampler,
             decoded: ffmpeg::frame::Audio::empty(),
             resampled: ffmpeg::frame::Audio::empty(),
             eos: false,
             flushing: false,
-            sample_rate: Self::OUTPUT_RATE,
+            sample_rate: output_rate,
             channels: Self::OUTPUT_CHANNELS,
         }))
     }
@@ -392,7 +430,7 @@ impl FfmpegAudioDecoder {
                     let input_rate = self.decoded.rate().max(1);
                     // Generous output allocation: resampling can produce more
                     // samples than the input frame holds.
-                    let capacity = ((input_samples as u64 * Self::OUTPUT_RATE as u64)
+                    let capacity = ((input_samples as u64 * self.sample_rate as u64)
                         / input_rate as u64) as usize
                         + 4096;
                     if self.resampled.samples() < capacity {
@@ -428,9 +466,23 @@ impl FfmpegAudioDecoder {
     }
 
     pub fn seek(&mut self, position_us: i64) -> Result<()> {
-        let target = us_to_pts(position_us, self.time_base);
-        self.input.seek(target, ..).map_err(|e| verr("audio seek", e))?;
+        let target = position_us.max(0);
+        if self.input.seek(target, ..target).is_err() {
+            self.input
+                .seek(target, ..)
+                .map_err(|e| verr("audio seek", e))?;
+        }
         self.decoder.flush();
+        if let Ok(resampler) = ffmpeg::software::resampling::Context::get(
+            self.decoder.format(),
+            self.decoder.channel_layout(),
+            self.decoder.rate(),
+            ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
+            ffmpeg::ChannelLayout::STEREO,
+            self.sample_rate,
+        ) {
+            self.resampler = resampler;
+        }
         self.eos = false;
         self.flushing = false;
         Ok(())

@@ -13,6 +13,23 @@ pub fn image_dimensions(path: &Path) -> Result<(u32, u32)> {
     image::image_dimensions(path).map_err(Into::into)
 }
 
+/// Probe dimensions of an image file, falling back to FFmpeg for formats the
+/// `image` crate does not recognise (AVIF, HEIC, JPEG XL, JP2, …).
+pub fn probe_image_dimensions(path: &Path) -> Option<(u32, u32)> {
+    if let Ok(dims) = image_dimensions(path) {
+        return Some(dims);
+    }
+    #[cfg(feature = "ffmpeg")]
+    {
+        if let Ok(info) = crate::video::ffmpeg::probe_video(path) {
+            if info.width > 0 && info.height > 0 {
+                return Some((info.width, info.height));
+            }
+        }
+    }
+    None
+}
+
 /// Decode an image file into RGBA, applying its EXIF orientation.
 pub fn decode_file(path: &Path) -> Result<RgbaFrame> {
     let file = File::open(path)?;
@@ -35,8 +52,8 @@ pub fn decode_file_scaled(path: &Path, max_dim: u32) -> Result<RgbaFrame> {
         Err(err) => {
             #[cfg(feature = "ffmpeg")]
             {
-                if let Ok(frame) = crate::video::ffmpeg::first_frame_rgba(path) {
-                    return Ok(scale_to_fit(frame, max_dim));
+                if let Ok(frame) = crate::video::ffmpeg::first_frame_scaled(path, max_dim) {
+                    return Ok(frame);
                 }
             }
             Err(err)
@@ -51,8 +68,8 @@ pub fn thumbnail_file(path: &Path, max_dim: u32) -> Result<RgbaFrame> {
         Err(err) => {
             #[cfg(feature = "ffmpeg")]
             {
-                if let Ok(frame) = crate::video::ffmpeg::first_frame_rgba(path) {
-                    return thumbnail(frame, max_dim);
+                if let Ok(frame) = crate::video::ffmpeg::first_frame_scaled(path, max_dim) {
+                    return Ok(frame);
                 }
             }
             Err(err)
