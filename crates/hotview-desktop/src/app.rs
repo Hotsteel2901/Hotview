@@ -1025,7 +1025,7 @@ impl HotviewApp {
                     if search_resp.changed() {
                         self.rebuild_visible_items(None);
                     }
-                    if !self.search_query.is_empty() && ui.button("✕").clicked() {
+                    if !self.search_query.is_empty() && ui.button("×").clicked() {
                         self.search_query.clear();
                         self.rebuild_visible_items(None);
                     }
@@ -1876,7 +1876,7 @@ impl HotviewApp {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr.info_title).size(15.5).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("✕").clicked() {
+                        if ui.button("×").on_hover_text(tr.close).clicked() {
                             self.settings.show_info = false;
                             self.settings.save();
                         }

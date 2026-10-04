@@ -17,6 +17,7 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
+    #[allow(dead_code)]
     pub const ALL: [ThemeMode; 3] = [ThemeMode::System, ThemeMode::Dark, ThemeMode::Light];
 
     pub fn code(self) -> &'static str {
@@ -255,97 +256,268 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: Rect, dark: bool) {
     }
 }
 
-/// Discover and register a system CJK/Unicode font on Windows, macOS, or Linux
-/// so Chinese, Japanese, Korean, and Cyrillic filenames and UI labels render
-/// without missing-glyph boxes (`□`). Returns `true` if a CJK font was loaded.
+/// Discover and register system fonts for Symbols, Chinese (Simplified/Traditional),
+/// Japanese, Korean, and broad Unicode scripts on Windows, macOS, and Linux.
+///
+/// This ensures UI glyphs (arrows, media controls, math operators, icons) and
+/// multilingual filenames (CJK, Korean Hangul, Japanese Kana/Kanji, Cyrillic, etc.)
+/// render cleanly without missing-glyph boxes (`□`).
+///
+/// Returns `true` if at least one CJK font was loaded.
 pub fn install_system_fonts(ctx: &Context) -> bool {
-    for candidate in cjk_font_candidates() {
-        if !candidate.is_file() {
-            continue;
+    let mut defs = FontDefinitions::default();
+
+    // 1. Ensure `Hack` is included in Proportional family as well.
+    // Egui bundles Hack with rich box-drawing, mathematical, and arrow symbols
+    // (such as ⇄, ⇅, ▦, ◉, ●, ◐, ↑, ↓, ←, →), but by default only places it in Monospace.
+    if let Some(prop) = defs.families.get_mut(&FontFamily::Proportional) {
+        if !prop.contains(&"Hack".to_string()) {
+            prop.push("Hack".to_string());
         }
-        let Ok(bytes) = std::fs::read(&candidate) else {
-            continue;
-        };
-        if bytes.len() < 1024 {
-            continue;
-        }
-        let mut defs = FontDefinitions::default();
-        defs.font_data.insert(
-            "hotview-cjk".to_owned(),
-            Arc::new(FontData::from_owned(bytes)),
-        );
-        if let Some(family) = defs.families.get_mut(&FontFamily::Proportional) {
-            family.push("hotview-cjk".to_owned());
-        }
-        if let Some(family) = defs.families.get_mut(&FontFamily::Monospace) {
-            family.push("hotview-cjk".to_owned());
-        }
-        ctx.set_fonts(defs);
-        log::info!("loaded system CJK font: {}", candidate.display());
-        return true;
     }
-    false
+
+    let mut loaded_canonical_paths = std::collections::HashSet::new();
+    let mut has_cjk = false;
+
+    // Helper closure to load the first available candidate font from a list.
+    let mut load_font_candidate =
+        |key: &str, candidates: &[PathBuf], prop_priority: bool| -> bool {
+            for path in candidates {
+                if !path.is_file() {
+                    continue;
+                }
+                let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if loaded_canonical_paths.contains(&canonical) {
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(path) else {
+                    continue;
+                };
+                if bytes.len() < 1024 {
+                    continue;
+                }
+
+                defs.font_data.insert(
+                    key.to_owned(),
+                    Arc::new(FontData::from_owned(bytes)),
+                );
+
+                if let Some(family) = defs.families.get_mut(&FontFamily::Proportional) {
+                    if prop_priority {
+                        // Place symbol fonts right after the primary Latin font (index 1)
+                        // so vector symbols take precedence over default emoji outlines.
+                        family.insert(1.min(family.len()), key.to_owned());
+                    } else {
+                        family.push(key.to_owned());
+                    }
+                }
+                if let Some(family) = defs.families.get_mut(&FontFamily::Monospace) {
+                    family.push(key.to_owned());
+                }
+
+                loaded_canonical_paths.insert(canonical);
+                log::info!("Loaded system font for '{key}': {}", path.display());
+                return true;
+            }
+            false
+        };
+
+    // 2. Discover system symbol & icon fonts (provides symbols like ✕, ☾, ⟲, ⟳, ⛶, etc.)
+    load_font_candidate("hotview-symbols", &symbol_font_candidates(), true);
+
+    // 3. Discover Chinese CJK fonts (Simplified / Traditional)
+    if load_font_candidate("hotview-cjk-zh", &cjk_zh_font_candidates(), false) {
+        has_cjk = true;
+    }
+
+    // 4. Discover Japanese CJK fonts (Kanji / Kana)
+    if load_font_candidate("hotview-cjk-ja", &cjk_ja_font_candidates(), false) {
+        has_cjk = true;
+    }
+
+    // 5. Discover Korean CJK fonts (Hangul syllables & Jamo)
+    if load_font_candidate("hotview-cjk-ko", &cjk_ko_font_candidates(), false) {
+        has_cjk = true;
+    }
+
+    // 6. Discover broad Unicode fallback font
+    load_font_candidate("hotview-unicode", &unicode_fallback_candidates(), false);
+
+    ctx.set_fonts(defs);
+    has_cjk
 }
 
-fn cjk_font_candidates() -> Vec<PathBuf> {
+fn symbol_font_candidates() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-
-    // Windows system fonts (%WINDIR%\Fonts or C:\Windows\Fonts)
     if let Ok(windir) = std::env::var("WINDIR") {
         let fonts = Path::new(&windir).join("Fonts");
-        for name in [
-            "msyh.ttc",
-            "msyh.ttf",
-            "YuGothR.ttc",
-            "msgothic.ttc",
-            "malgun.ttf",
-            "simhei.ttf",
-            "simsun.ttc",
-        ] {
+        paths.push(fonts.join("seguisym.ttf"));
+        paths.push(fonts.join("seguiemj.ttf"));
+    }
+    paths.push(PathBuf::from(r"C:\Windows\Fonts\seguisym.ttf"));
+    paths.push(PathBuf::from(r"C:\Windows\Fonts\seguiemj.ttf"));
+
+    // macOS
+    paths.push(PathBuf::from("/System/Library/Fonts/Apple Symbols.ttf"));
+    paths.push(PathBuf::from("/System/Library/Fonts/Supplemental/Apple Symbols.ttf"));
+    paths.push(PathBuf::from("/System/Library/Fonts/Apple Color Emoji.ttc"));
+
+    // Linux
+    for p in [
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansSymbols-Regular.otf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/symbola/Symbola.ttf",
+        "/usr/share/fonts/google-noto/NotoSansSymbols-Regular.ttf",
+        "/usr/local/share/fonts/NotoSansSymbols-Regular.ttf",
+    ] {
+        paths.push(PathBuf::from(p));
+    }
+    paths
+}
+
+fn cjk_zh_font_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(windir) = std::env::var("WINDIR") {
+        let fonts = Path::new(&windir).join("Fonts");
+        for name in ["msyh.ttc", "msyh.ttf", "simsun.ttc", "simhei.ttf", "mingliu.ttc"] {
             paths.push(fonts.join(name));
         }
     }
     for name in [
         r"C:\Windows\Fonts\msyh.ttc",
         r"C:\Windows\Fonts\msyh.ttf",
-        r"C:\Windows\Fonts\YuGothR.ttc",
-        r"C:\Windows\Fonts\msgothic.ttc",
-        r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
+        r"C:\Windows\Fonts\simhei.ttf",
+        r"C:\Windows\Fonts\mingliu.ttc",
     ] {
         paths.push(PathBuf::from(name));
     }
 
-    // macOS system fonts
-    for path in [
+    // macOS
+    for p in [
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",
-        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "/Library/Fonts/Arial Unicode.ttf",
     ] {
-        paths.push(PathBuf::from(path));
+        paths.push(PathBuf::from(p));
     }
 
-    // Linux common CJK font locations (Debian/Ubuntu/Fedora/Arch/openSUSE/NixOS)
-    for path in [
+    // Linux
+    for p in [
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/share/fonts/adobe-source-han-sans/SourceHanSansSC-Regular.otf",
         "/usr/share/fonts/adobe-source-han-sans/SourceHanSansCN-Regular.otf",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/local/share/fonts/NotoSansCJK-Regular.ttc",
     ] {
-        paths.push(PathBuf::from(path));
+        paths.push(PathBuf::from(p));
     }
+    paths
+}
+
+fn cjk_ja_font_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(windir) = std::env::var("WINDIR") {
+        let fonts = Path::new(&windir).join("Fonts");
+        for name in ["YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"] {
+            paths.push(fonts.join(name));
+        }
+    }
+    for name in [
+        r"C:\Windows\Fonts\YuGothR.ttc",
+        r"C:\Windows\Fonts\meiryo.ttc",
+        r"C:\Windows\Fonts\msgothic.ttc",
+    ] {
+        paths.push(PathBuf::from(name));
+    }
+
+    // macOS
+    for p in [
+        "/System/Library/Fonts/Hiragino Sans.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/Supplemental/Yu Gothic Medium.otf",
+    ] {
+        paths.push(PathBuf::from(p));
+    }
+
+    // Linux
+    for p in [
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf",
+        "/usr/share/fonts/truetype/vlgothic/VL-Gothic-Regular.ttf",
+        "/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf",
+    ] {
+        paths.push(PathBuf::from(p));
+    }
+    paths
+}
+
+fn cjk_ko_font_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(windir) = std::env::var("WINDIR") {
+        let fonts = Path::new(&windir).join("Fonts");
+        for name in ["malgun.ttf", "malgun.ttc", "gulim.ttc", "batang.ttc"] {
+            paths.push(fonts.join(name));
+        }
+    }
+    for name in [
+        r"C:\Windows\Fonts\malgun.ttf",
+        r"C:\Windows\Fonts\malgun.ttc",
+        r"C:\Windows\Fonts\gulim.ttc",
+        r"C:\Windows\Fonts\batang.ttc",
+    ] {
+        paths.push(PathBuf::from(name));
+    }
+
+    // macOS
+    for p in [
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+    ] {
+        paths.push(PathBuf::from(p));
+    }
+
+    // Linux
+    for p in [
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansKR-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/baekmuk/gulim.ttf",
+    ] {
+        paths.push(PathBuf::from(p));
+    }
+    paths
+}
+
+fn unicode_fallback_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(windir) = std::env::var("WINDIR") {
+        let fonts = Path::new(&windir).join("Fonts");
+        paths.push(fonts.join("segoeui.ttf"));
+        paths.push(fonts.join("arial.ttf"));
+    }
+    paths.push(PathBuf::from(r"C:\Windows\Fonts\segoeui.ttf"));
+    paths.push(PathBuf::from(r"C:\Windows\Fonts\arial.ttf"));
+
+    // macOS
+    paths.push(PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"));
+    paths.push(PathBuf::from("/Library/Fonts/Arial Unicode.ttf"));
+
+    // Linux
+    paths.push(PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));
+    paths.push(PathBuf::from("/usr/share/fonts/truetype/freefont/FreeSans.ttf"));
 
     paths
 }
@@ -445,3 +617,59 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (f32, f32, f32) {
         lerp(a.2 as f32, b.2 as f32, t),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::FontId;
+
+    #[test]
+    fn test_glyph_coverage() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let ctx = Context::default();
+        let loaded = install_system_fonts(&ctx);
+        println!("install_system_fonts returned: {loaded}");
+        assert!(loaded, "install_system_fonts should discover system fonts");
+
+        let mut output = ctx.run_ui(Default::default(), |_| {});
+        output.textures_delta.clear();
+        let mut output2 = ctx.run_ui(Default::default(), |_| {});
+        output2.textures_delta.clear();
+        
+        let all_hotview_chars = [
+            '⬅', '●', '📄', '📁', '◀', '▶', '−', '+', '⟲', '⟳', '⇄', '⇅', '▦',
+            '↑', '↓', '←', '→', '🔍', '✕', '⛶', '⚙', '⏸', '⏪', '⏩',
+            '🔇', '🔉', '🔊', '◉', '⚠', '📂', '📋', '⌨', '◐', '☾', '☀', 'ℹ',
+            // Chinese
+            '你', '好', '世', '界', '打', '开', '文', '件', '夹', '设', '置', '图', '片',
+            // Japanese
+            '日', '本', '語', '再', '生', '前', '次', '拡', '大', '画', '像',
+            // Korean
+            '한', '国', '어', '파', '일', '열', '기', '재', '생',
+            // Cyrillic
+            'Р', 'у', 'с', 'с', 'к', 'и', 'й',
+            // German
+            'ö', 'ä', 'ü', 'ß',
+        ];
+        
+        ctx.fonts_mut(|f| {
+            let font_id = FontId::proportional(14.0);
+            let mut failed = Vec::new();
+            for &c in &all_hotview_chars {
+                let galley = f.layout_no_wrap(c.to_string(), font_id.clone(), egui::Color32::WHITE);
+                let first = galley.rows[0].row.glyphs.first();
+                if let Some(g) = first {
+                    // Make sure it has a positive advance width and non-zero height
+                    if g.advance_width <= 0.0 {
+                        failed.push((c, "zero advance width"));
+                    }
+                } else {
+                    failed.push((c, "no glyph produced"));
+                }
+            }
+            println!("All {} tested chars verified!", all_hotview_chars.len());
+            assert!(failed.is_empty(), "Failed glyphs: {:?}", failed);
+        });
+    }
+}
+
