@@ -147,7 +147,10 @@ impl MediaRenderer {
                     compilation_options: PipelineCompilationOptions::default(),
                     targets: &[Some(ColorTargetState {
                         format,
-                        blend: None,
+                        // RGBA image textures use straight alpha. Blend into a
+                        // premultiplied target so transparent RGB (often blue
+                        // in PNGs) never leaks through to the surface.
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: ColorWrites::ALL,
                     })],
                 }),
@@ -464,7 +467,7 @@ impl MediaRenderer {
                     view,
                     resolve_target: None,
                     ops: Operations {
-                        load: LoadOp::Clear(wgpu::Color::BLACK),
+                        load: LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: StoreOp::Store,
                     },
                     depth_slice: None,

@@ -152,8 +152,16 @@ fun ViewerScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && !settings.backgroundPlayback) {
-                currentView?.pause()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    // GIF/WebP animation never runs in the background.
+                    currentView?.suspendAnimation()
+                    if (!settings.backgroundPlayback) {
+                        currentView?.pause()
+                    }
+                }
+                Lifecycle.Event.ON_START -> currentView?.resumeAnimation()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -527,6 +535,12 @@ private fun ViewerPage(
                     view.load(item)
                     if (item.isVideo) {
                         if (active && autoPlay) view.play() else view.pause()
+                    } else if (active) {
+                        // Animated GIF/WebP: play while the page is the active
+                        // one, keep preloaded neighbour pages paused.
+                        view.play()
+                    } else {
+                        view.pause()
                     }
                 }
             },
@@ -559,6 +573,10 @@ private fun ViewerPage(
             val view = viewRef.value ?: return@LaunchedEffect
             if (item.isVideo) {
                 if (active && autoPlay) view.play() else view.pause()
+            } else if (active) {
+                view.play()
+            } else {
+                view.pause()
             }
         }
 

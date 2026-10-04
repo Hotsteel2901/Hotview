@@ -16,7 +16,10 @@ use jni::sys::{jboolean, jfloat, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use hotview_core::video::mediacodec::{MediaCodecAudioDecoder, MediaCodecDecoder};
 use hotview_core::video::AudioDecoder;
-use hotview_core::{decode_bytes, scale_to_fit, MediaFrame};
+use hotview_core::{
+    decode_bytes, may_contain_animation_bytes, probe_image_dimensions_bytes, scale_to_fit,
+    MediaFrame,
+};
 use hotview_render::GpuContext;
 use ndk_sys::{ANativeWindow_fromSurface, ANativeWindow_release, ANativeWindow};
 
@@ -248,6 +251,18 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setImageFil
             return -1;
         }
 
+        // Animated GIF/WebP goes to the render thread, which paces the frames.
+        if may_contain_animation_bytes(&bytes).unwrap_or(false)
+            && let Ok((width, height)) = probe_image_dimensions_bytes(&bytes)
+            && width as u64 * height as u64 <= MAX_IMAGE_PIXELS
+        {
+            return if send(handle, Command::SetAnimation(Arc::from(bytes))) {
+                0
+            } else {
+                -1
+            };
+        }
+
         match decode_bytes(&bytes) {
             Ok(frame) => {
                 if frame.width as u64 * frame.height as u64 > MAX_IMAGE_PIXELS {
@@ -391,6 +406,22 @@ pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setPlaying(
 ) {
     caught(|| {
         let _ = send(handle, Command::SetPlaying(playing != JNI_FALSE));
+    })
+}
+
+/// Pause/resume GIF & WebP animation playback (video playback uses `setPlaying`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hotsteel_hotview_native_NativeBridge_setImageAnimationPlaying(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    playing: jboolean,
+) {
+    caught(|| {
+        let _ = send(
+            handle,
+            Command::SetImageAnimationPlaying(playing != JNI_FALSE),
+        );
     })
 }
 

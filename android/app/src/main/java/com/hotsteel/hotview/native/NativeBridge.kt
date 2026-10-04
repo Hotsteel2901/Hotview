@@ -114,6 +114,9 @@ object NativeBridge {
 
     external fun setViewport(handle: Long, scale: Float, panX: Float, panY: Float, fill: Boolean)
     external fun setPlaying(handle: Long, playing: Boolean)
+
+    /** Start/stop GIF & WebP animation playback (videos use [setPlaying]). */
+    external fun setImageAnimationPlaying(handle: Long, playing: Boolean)
     external fun isPlaying(handle: Long): Boolean
     external fun isPrepared(handle: Long): Boolean
     external fun hasAudio(handle: Long): Boolean

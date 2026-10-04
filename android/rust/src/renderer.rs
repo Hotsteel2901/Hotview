@@ -10,7 +10,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use hotview_core::video::{AudioDecoder, AudioOutcome, DecodeOutcome, VideoDecoder};
-use hotview_core::{MediaFrame, YuvInfo};
+use hotview_core::{ImageAnimation, MediaFrame, RgbaFrame, YuvInfo};
 use hotview_render::wgpu;
 use hotview_render::{fit_transform, surface_from_android_window, GpuContext, MediaRenderer};
 
@@ -39,6 +39,7 @@ pub enum Command {
         height: u32,
     },
     SetFrame(MediaFrame),
+    SetAnimation(Arc<[u8]>),
     SetVideo {
         video: Box<dyn VideoDecoder>,
         audio: Option<Box<dyn AudioDecoder>>,
@@ -49,6 +50,7 @@ pub enum Command {
         fill: bool,
     },
     SetPlaying(bool),
+    SetImageAnimationPlaying(bool),
     Seek(i64),
     SetLooping(bool),
     Quit {
@@ -589,6 +591,16 @@ struct SurfaceState {
     logged_success: bool,
 }
 
+struct ImageAnimationPlayback {
+    decoder: ImageAnimation,
+    next_frame_at: Instant,
+    playing: bool,
+}
+
+const MAX_ANIMATION_TEXTURE_DIM: u32 = 3072;
+/// Animated frames are decoded at up to this many pixels before scaling.
+const MAX_ANIMATION_PIXELS: u64 = 24_000_000;
+
 /// Entry point of the render thread.
 pub fn run(
     ctx: Arc<GpuContext>,
@@ -600,17 +612,28 @@ pub fn run(
     let mut renderer: Option<MediaRenderer> = None;
     let mut pending_frame: Option<MediaFrame> = None;
     let mut session: Option<PlaybackSession> = None;
+    let mut image_animation: Option<ImageAnimationPlayback> = None;
+    let mut image_animation_playing = true;
     let mut scale = 1.0f32;
     let mut pan = [0.0f32; 2];
     let mut fill = false;
     let mut dirty = false;
 
     loop {
-        let timeout = if session.as_ref().map(|s| s.playing).unwrap_or(false) {
+        let mut timeout = if session.as_ref().map(|s| s.playing).unwrap_or(false) {
             Duration::from_millis(4)
         } else {
             Duration::from_millis(50)
         };
+        if renderer.is_some()
+            && let Some(animation) = image_animation.as_ref().filter(|animation| animation.playing)
+        {
+            timeout = timeout.min(
+                animation
+                    .next_frame_at
+                    .saturating_duration_since(Instant::now()),
+            );
+        }
 
         match rx.recv_timeout(timeout) {
             Ok(command) => {
@@ -622,6 +645,8 @@ pub fn run(
                     &mut renderer,
                     &mut pending_frame,
                     &mut session,
+                    &mut image_animation,
+                    &mut image_animation_playing,
                     &mut scale,
                     &mut pan,
                     &mut fill,
@@ -641,6 +666,8 @@ pub fn run(
                         &mut renderer,
                         &mut pending_frame,
                         &mut session,
+                        &mut image_animation,
+                        &mut image_animation_playing,
                         &mut scale,
                         &mut pan,
                         &mut fill,
@@ -663,6 +690,17 @@ pub fn run(
 
         if let Some(session) = session.as_mut() {
             session.pump(&ctx, renderer.as_mut(), &shared, &mut dirty, &events);
+        }
+        if renderer.is_some() {
+            pump_image_animation(
+                &ctx,
+                &mut renderer,
+                &mut pending_frame,
+                &mut image_animation,
+                &shared,
+                &mut dirty,
+                &events,
+            );
         }
 
         if dirty {
@@ -694,6 +732,101 @@ pub fn run(
     let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
 }
 
+fn set_still_frame(
+    frame: MediaFrame,
+    ctx: &GpuContext,
+    renderer: &mut Option<MediaRenderer>,
+    pending_frame: &mut Option<MediaFrame>,
+    shared: &Shared,
+    dirty: &mut bool,
+) {
+    let dimensions = frame.dimensions();
+    if let Some(renderer) = renderer.as_mut() {
+        renderer.set_frame(&ctx.device, &ctx.queue, &frame);
+        *dirty = true;
+    } else {
+        *pending_frame = Some(frame);
+    }
+    shared.width.store(dimensions.0, Ordering::Relaxed);
+    shared.height.store(dimensions.1, Ordering::Relaxed);
+}
+
+fn reset_still_playback(shared: &Shared) {
+    shared.duration_us.store(0, Ordering::Relaxed);
+    shared.position_us.store(0, Ordering::Relaxed);
+    shared.playing.store(false, Ordering::Relaxed);
+    shared.prepared.store(false, Ordering::Relaxed);
+    shared.has_audio.store(false, Ordering::Relaxed);
+}
+
+fn decode_static_animation_frame(bytes: &[u8]) -> Result<RgbaFrame, String> {
+    hotview_core::decode_bytes(bytes)
+        .map(|frame| hotview_core::scale_to_fit(frame, MAX_ANIMATION_TEXTURE_DIM))
+        .map_err(|err| err.to_string())
+}
+
+fn advance_image_animation(
+    animation: &mut ImageAnimationPlayback,
+) -> Result<Option<RgbaFrame>, String> {
+    let mut timed = animation
+        .decoder
+        .next_frame()
+        .map_err(|err| err.to_string())?;
+    if timed.is_none() {
+        animation
+            .decoder
+            .rewind()
+            .map_err(|err| err.to_string())?;
+        timed = animation
+            .decoder
+            .next_frame()
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(timed.map(|frame| {
+        animation.next_frame_at = Instant::now() + frame.delay;
+        frame.frame
+    }))
+}
+
+fn pump_image_animation(
+    ctx: &GpuContext,
+    renderer: &mut Option<MediaRenderer>,
+    pending_frame: &mut Option<MediaFrame>,
+    image_animation: &mut Option<ImageAnimationPlayback>,
+    shared: &Shared,
+    dirty: &mut bool,
+    events: &Option<EventSink>,
+) {
+    let now = Instant::now();
+    let due = image_animation
+        .as_ref()
+        .map(|animation| animation.playing && now >= animation.next_frame_at)
+        .unwrap_or(false);
+    if !due {
+        return;
+    }
+
+    let result = advance_image_animation(image_animation.as_mut().expect("due animation"));
+    match result {
+        Ok(Some(frame)) => set_still_frame(
+            MediaFrame::Rgba(frame),
+            ctx,
+            renderer,
+            pending_frame,
+            shared,
+            dirty,
+        ),
+        Ok(None) => *image_animation = None,
+        Err(err) => {
+            log::warn!("animated image playback stopped: {err}");
+            if let Some(events) = events {
+                events.error(5, &err);
+            }
+            *image_animation = None;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_command(
     command: Command,
@@ -702,6 +835,8 @@ fn handle_command(
     renderer: &mut Option<MediaRenderer>,
     pending_frame: &mut Option<MediaFrame>,
     session: &mut Option<PlaybackSession>,
+    image_animation: &mut Option<ImageAnimationPlayback>,
+    image_animation_playing: &mut bool,
     scale: &mut f32,
     pan: &mut [f32; 2],
     fill: &mut bool,
@@ -728,11 +863,20 @@ fn handle_command(
                         .find(|format| !format.is_srgb())
                         .or_else(|| caps.formats.first().copied())
                         .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
-                    let alpha_mode = caps
+                    // The viewer composites onto its own (black) background, so
+                    // the swap chain stays opaque: transparent image pixels are
+                    // blended by the media shader, never by the window compositor.
+                    let alpha_mode = if caps
                         .alpha_modes
-                        .first()
-                        .copied()
-                        .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
+                        .contains(&wgpu::CompositeAlphaMode::Opaque)
+                    {
+                        wgpu::CompositeAlphaMode::Opaque
+                    } else {
+                        caps.alpha_modes
+                            .first()
+                            .copied()
+                            .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+                    };
                     let config = wgpu::SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format,
@@ -801,20 +945,95 @@ fn handle_command(
         Command::SetFrame(frame) => {
             let (frame_width, frame_height) = frame.dimensions();
             log::info!("still frame set: {frame_width}x{frame_height}");
-            if let Some(renderer) = renderer {
-                renderer.set_frame(&ctx.device, &ctx.queue, &frame);
-                shared.width.store(frame.dimensions().0, Ordering::Relaxed);
-                shared.height.store(frame.dimensions().1, Ordering::Relaxed);
-                *dirty = true;
-            } else {
-                *pending_frame = Some(frame);
-            }
+            set_still_frame(frame, ctx, renderer, pending_frame, shared, dirty);
             *session = None;
-            shared.duration_us.store(0, Ordering::Relaxed);
-            shared.position_us.store(0, Ordering::Relaxed);
-            shared.playing.store(false, Ordering::Relaxed);
-            shared.prepared.store(false, Ordering::Relaxed);
-            shared.has_audio.store(false, Ordering::Relaxed);
+            *image_animation = None;
+            reset_still_playback(shared);
+        }
+        Command::SetAnimation(bytes) => {
+            *session = None;
+            match ImageAnimation::from_bytes(
+                Arc::clone(&bytes),
+                MAX_ANIMATION_TEXTURE_DIM,
+                MAX_ANIMATION_PIXELS,
+            ) {
+                Ok(Some(decoder)) => {
+                    let (width, height) = decoder.dimensions();
+                    log::info!("animated image set: {width}x{height}");
+                    *image_animation = Some(ImageAnimationPlayback {
+                        decoder,
+                        next_frame_at: Instant::now(),
+                        playing: *image_animation_playing,
+                    });
+                    // Show the first frame right away (even while paused) so a
+                    // preloaded, inactive page still has a preview during swipes.
+                    if let Ok(Some(frame)) =
+                        advance_image_animation(image_animation.as_mut().expect("just set"))
+                    {
+                        set_still_frame(
+                            MediaFrame::Rgba(frame),
+                            ctx,
+                            renderer,
+                            pending_frame,
+                            shared,
+                            dirty,
+                        );
+                    }
+                }
+                Ok(None) => {
+                    // Single-frame GIF or still WebP: display the first frame.
+                    *image_animation = None;
+                    match decode_static_animation_frame(&bytes) {
+                        Ok(frame) => {
+                            set_still_frame(
+                                MediaFrame::Rgba(frame),
+                                ctx,
+                                renderer,
+                                pending_frame,
+                                shared,
+                                dirty,
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!("static frame decode failed: {err}");
+                            if let Some(events) = events {
+                                events.error(7, &err);
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    // Decoder cannot stream the animation; show its first frame.
+                    log::warn!("animation decode failed ({err}); showing first frame");
+                    *image_animation = None;
+                    if let Ok(frame) = decode_static_animation_frame(&bytes) {
+                        set_still_frame(
+                            MediaFrame::Rgba(frame),
+                            ctx,
+                            renderer,
+                            pending_frame,
+                            shared,
+                            dirty,
+                        );
+                    } else if let Some(events) = events {
+                        events.error(7, &err.to_string());
+                    }
+                }
+            }
+            reset_still_playback(shared);
+        }
+        Command::SetImageAnimationPlaying(playing) => {
+            *image_animation_playing = playing;
+            if let Some(animation) = image_animation.as_mut() {
+                if playing && !animation.playing {
+                    // Do not replay every frame that elapsed while paused.
+                    animation.next_frame_at = Instant::now();
+                }
+                animation.playing = playing;
+                if playing {
+                    *dirty = true;
+                }
+            }
         }
         Command::SetVideo { video, audio } => {
             let info = video.info().clone();
@@ -835,6 +1054,7 @@ fn handle_command(
                 info.duration_us.unwrap_or(0) as f64 / 1e6
             );
             *session = Some(new_session);
+            *image_animation = None;
             shared
                 .duration_us
                 .store(info.duration_us.unwrap_or(0).max(0), Ordering::Relaxed);
@@ -897,6 +1117,8 @@ fn handle_command_guarded(
     renderer: &mut Option<MediaRenderer>,
     pending_frame: &mut Option<MediaFrame>,
     session: &mut Option<PlaybackSession>,
+    image_animation: &mut Option<ImageAnimationPlayback>,
+    image_animation_playing: &mut bool,
     scale: &mut f32,
     pan: &mut [f32; 2],
     fill: &mut bool,
@@ -913,6 +1135,8 @@ fn handle_command_guarded(
             renderer,
             pending_frame,
             session,
+            image_animation,
+            image_animation_playing,
             scale,
             pan,
             fill,

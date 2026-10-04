@@ -161,6 +161,26 @@ fn rgba_frame_is_drawn() {
 }
 
 #[test]
+fn rgba_alpha_hides_transparent_rgb_and_preserves_partial_alpha() {
+    let Some(ctx) = context() else { return };
+    let transparent = frame_with(&[[0, 0, 255, 0]; 4]);
+    let transparent_pixels = render_and_read(&ctx, &transparent, [1.0, 1.0, 0.0, 0.0]);
+    let transparent_center = pixel(&transparent_pixels, W / 2, H / 2);
+    assert_eq!(transparent_center, [0, 0, 0, 0]);
+
+    let translucent = frame_with(&[[255, 0, 0, 128]; 4]);
+    let translucent_pixels = render_and_read(&ctx, &translucent, [1.0, 1.0, 0.0, 0.0]);
+    let translucent_center = pixel(&translucent_pixels, W / 2, H / 2);
+    assert!(
+        (127..=128).contains(&translucent_center[0])
+            && translucent_center[1] == 0
+            && translucent_center[2] == 0
+            && (127..=128).contains(&translucent_center[3]),
+        "expected premultiplied half-alpha red, got {translucent_center:?}"
+    );
+}
+
+#[test]
 fn nv12_frame_is_drawn() {
     let Some(ctx) = context() else { return };
 

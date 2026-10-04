@@ -12,9 +12,9 @@ import java.nio.ByteBuffer
 
 /**
  * A `SurfaceView` whose contents are rendered by the Rust wgpu renderer.
- * Images are decoded in Rust; videos go through Rust + MediaCodec. When the
- * Rust decoder does not know a format (HEIC), Kotlin decodes the image and
- * hands the RGBA buffer back to the renderer.
+ * Images (including animated GIF/WebP) are decoded in Rust; videos go through
+ * Rust + MediaCodec. When the Rust decoder does not know a format (HEIC),
+ * Kotlin decodes the image and hands the RGBA buffer back to the renderer.
  *
  * Native failures degrade into a readable message (and the Compose layer shows
  * a platform-decoded image) instead of taking the process down.
@@ -27,6 +27,7 @@ class MediaSurfaceView(context: Context) :
     private var handle = 0L
     private var pending: (() -> Unit)? = null
     private var desiredPlaying = false
+    private var desiredAnimating = true
 
     /** Duration in ms, fired when a video has been prepared. */
     var onPrepared: ((Long) -> Unit)? = null
@@ -70,6 +71,9 @@ class MediaSurfaceView(context: Context) :
             if (desiredPlaying) {
                 runCatching { NativeBridge.setPlaying(handle, true) }
             }
+            // Always state the animation wish: the page may be a preloaded
+            // neighbour that must stay paused until it becomes active.
+            runCatching { NativeBridge.setImageAnimationPlaying(handle, desiredAnimating) }
             pending?.invoke()
         }
         pending = null
@@ -154,16 +158,28 @@ class MediaSurfaceView(context: Context) :
     private fun decodeWithPlatform(uri: Uri) {
         Thread {
             val bitmap = PlatformDecode.decode(context, uri)
-            if (bitmap != null && handle != 0L) {
+            val currentHandle = handle
+            if (bitmap != null && currentHandle != 0L) {
                 val argb = if (bitmap.config == Bitmap.Config.ARGB_8888) {
                     bitmap
                 } else {
                     bitmap.copy(Bitmap.Config.ARGB_8888, false)
                 }
-                val buffer = ByteBuffer.allocateDirect(argb.byteCount)
-                argb.copyPixelsToBuffer(buffer)
+                // `copyPixelsToBuffer` stores the device-dependent channel
+                // order (BGRA on many GPUs), which made red and blue swap.
+                // Pack straight RGBA explicitly; `getPixel`-style ints are
+                // always ARGB regardless of the internal layout.
+                val pixels = IntArray(argb.width * argb.height)
+                argb.getPixels(pixels, 0, argb.width, 0, 0, argb.width, argb.height)
+                val buffer = ByteBuffer.allocateDirect(pixels.size * 4)
+                for (pixel in pixels) {
+                    buffer.put((pixel shr 16).toByte())
+                    buffer.put((pixel shr 8).toByte())
+                    buffer.put(pixel.toByte())
+                    buffer.put((pixel ushr 24).toByte())
+                }
                 buffer.rewind()
-                runCatching { NativeBridge.setBitmap(handle, buffer, argb.width, argb.height) }
+                runCatching { NativeBridge.setBitmap(currentHandle, buffer, argb.width, argb.height) }
             } else if (bitmap == null) {
                 post { onErrorEvent?.invoke(context.getString(R.string.viewer_image_unsupported)) }
             }
@@ -174,19 +190,41 @@ class MediaSurfaceView(context: Context) :
 
     fun play() {
         desiredPlaying = true
+        desiredAnimating = true
         val current = handle
-        if (current != 0L) runCatching { NativeBridge.setPlaying(current, true) }
+        if (current != 0L) {
+            runCatching { NativeBridge.setPlaying(current, true) }
+            runCatching { NativeBridge.setImageAnimationPlaying(current, true) }
+        }
     }
 
     fun pause() {
         desiredPlaying = false
+        desiredAnimating = false
         val current = handle
-        if (current != 0L) runCatching { NativeBridge.setPlaying(current, false) }
+        if (current != 0L) {
+            runCatching { NativeBridge.setPlaying(current, false) }
+            runCatching { NativeBridge.setImageAnimationPlaying(current, false) }
+        }
     }
 
     fun isPlaying(): Boolean {
         val current = handle
         return current != 0L && runCatching { NativeBridge.isPlaying(current) }.getOrDefault(false)
+    }
+
+    /** Pause GIF/WebP animation without touching video playback. */
+    fun suspendAnimation() {
+        desiredAnimating = false
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setImageAnimationPlaying(current, false) }
+    }
+
+    /** Resume GIF/WebP animation without touching video playback. */
+    fun resumeAnimation() {
+        desiredAnimating = true
+        val current = handle
+        if (current != 0L) runCatching { NativeBridge.setImageAnimationPlaying(current, true) }
     }
 
     fun isPrepared(): Boolean {

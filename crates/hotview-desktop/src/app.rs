@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -11,8 +11,8 @@ use egui::{
     ViewportCommand,
 };
 use hotview_core::{
-    decode_file_scaled, is_media_path, is_video_path, mime_from_path, probe_image_dimensions,
-    RgbaFrame,
+    decode_file_scaled, is_media_path, is_video_path, mime_from_path, open_animated_file,
+    probe_image_dimensions, RgbaFrame,
 };
 
 use crate::i18n::{Lang, LanguagePref, Strings, strings};
@@ -31,6 +31,9 @@ const MAX_VISIBLE_ITEMS: usize = 5000;
 const MAX_CACHED_TEXTURES: usize = 1500;
 const EVICT_BATCH: usize = 128;
 const SPEEDS: [f32; 5] = [0.5, 1.0, 1.25, 1.5, 2.0];
+/// Animated GIF/WebP frames are decoded at up to this many pixels before
+/// being scaled down for the viewer.
+const MAX_ANIMATED_PIXELS: u64 = 64_000_000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
@@ -70,6 +73,27 @@ enum ZoomMode {
 struct DecodedImage {
     frame: RgbaFrame,
     original_dims: Option<(u32, u32)>,
+    animated: bool,
+}
+
+impl DecodedImage {
+    /// Apply the viewer's current rotation/flip to an animation frame.
+    fn transform(self, rot: u8, flip_h: bool, flip_v: bool) -> Self {
+        let mut frame = self.frame;
+        frame = match rot % 4 {
+            1 => frame.rotate_90_cw(),
+            2 => frame.rotate_180(),
+            3 => frame.rotate_90_ccw(),
+            _ => frame,
+        };
+        if flip_h {
+            frame = frame.flip_horizontal();
+        }
+        if flip_v {
+            frame = frame.flip_vertical();
+        }
+        Self { frame, ..self }
+    }
 }
 
 struct Viewer {
@@ -80,6 +104,13 @@ struct Viewer {
     image: Option<(TextureHandle, (u32, u32))>,
     image_error: Option<String>,
     image_rx: Option<Receiver<Result<DecodedImage, String>>>,
+    image_animation_cancel: Option<Sender<()>>,
+    image_animated: bool,
+    /// Rotation/flip applied to every animation frame (still images bake the
+    /// transform into the loaded frame instead).
+    image_rot: u8,
+    image_flip_h: bool,
+    image_flip_v: bool,
     player: Option<Player>,
     video_texture: Option<TextureHandle>,
     video_size: (u32, u32),
@@ -110,6 +141,11 @@ impl Viewer {
             image: None,
             image_error: None,
             image_rx: None,
+            image_animation_cancel: None,
+            image_animated: false,
+            image_rot: 0,
+            image_flip_h: false,
+            image_flip_v: false,
             player: None,
             video_texture: None,
             video_size: (0, 0),
@@ -130,6 +166,77 @@ impl Viewer {
             zoom_mode: ZoomMode::Contain,
             pan: Vec2::ZERO,
         }
+    }
+}
+
+fn load_image_worker(
+    path: PathBuf,
+    tx: SyncSender<Result<DecodedImage, String>>,
+    cancel: Receiver<()>,
+) {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // GIF/WebP animations: stream frames with their own timing.
+        let animation = open_animated_file(&path, 8192, MAX_ANIMATED_PIXELS)
+            .ok()
+            .flatten();
+        if let Some(mut animation) = animation {
+            let original_dims = Some(animation.dimensions());
+            loop {
+                if image_decode_cancelled(&cancel) {
+                    return Ok(());
+                }
+                let timed = match animation.next_frame().map_err(|err| err.to_string())? {
+                    Some(frame) => frame,
+                    None => {
+                        animation.rewind().map_err(|err| err.to_string())?;
+                        continue;
+                    }
+                };
+                let delay = timed.delay;
+                if tx
+                    .send(Ok(DecodedImage {
+                        frame: timed.frame,
+                        original_dims,
+                        animated: true,
+                    }))
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                match cancel.recv_timeout(delay) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        return Ok(());
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        }
+
+        let original_dims = probe_image_dimensions(&path);
+        let frame = decode_file_scaled(&path, 8192).map_err(|err| err.to_string())?;
+        let _ = tx.send(Ok(DecodedImage {
+            frame,
+            original_dims,
+            animated: false,
+        }));
+        Ok(())
+    }));
+
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            let _ = tx.send(Err(err));
+        }
+        Err(_) => {
+            let _ = tx.send(Err("decoder crashed on this file".to_string()));
+        }
+    }
+}
+
+fn image_decode_cancelled(cancel: &Receiver<()>) -> bool {
+    match cancel.try_recv() {
+        Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => true,
+        Err(std::sync::mpsc::TryRecvError::Empty) => false,
     }
 }
 
@@ -448,6 +555,7 @@ impl HotviewApp {
     }
 
     fn return_to_gallery(&mut self) {
+        self.cancel_image_decode();
         self.selected_gallery_index = self.viewer.index.min(self.visible_len().saturating_sub(1));
         self.screen = Screen::Gallery;
         self.viewer.player = None;
@@ -455,10 +563,19 @@ impl HotviewApp {
         self.update_window_title();
     }
 
+    fn cancel_image_decode(&mut self) {
+        if let Some(cancel) = self.viewer.image_animation_cancel.take() {
+            let _ = cancel.send(());
+        }
+        self.viewer.image_rx = None;
+        self.viewer.image_animated = false;
+    }
+
     fn open_viewer(&mut self, visible_index: usize) {
         if visible_index >= self.visible_len() {
             return;
         }
+        self.cancel_image_decode();
         self.selected_gallery_index = visible_index;
         self.screen = Screen::Viewer;
         self.viewer = Viewer::new(self.settings.loop_video);
@@ -468,6 +585,7 @@ impl HotviewApp {
     }
 
     fn start_viewer_item(&mut self, auto_play_video: bool) {
+        self.cancel_image_decode();
         let Some(item) = self.visible_item(self.viewer.index).cloned() else {
             return;
         };
@@ -476,6 +594,11 @@ impl HotviewApp {
         self.viewer.image = None;
         self.viewer.image_error = None;
         self.viewer.image_rx = None;
+        self.viewer.image_animation_cancel = None;
+        self.viewer.image_animated = false;
+        self.viewer.image_rot = 0;
+        self.viewer.image_flip_h = false;
+        self.viewer.image_flip_v = false;
         self.viewer.player = None;
         self.viewer.video_texture = None;
         self.viewer.video_size = (0, 0);
@@ -496,24 +619,16 @@ impl HotviewApp {
         match item.kind {
             MediaKind::Image => {
                 let path = item.path.clone();
-                let (tx, rx) = std::sync::mpsc::channel();
+                let (tx, rx) = std::sync::mpsc::sync_channel(2);
+                let (cancel_tx, cancel_rx) = std::sync::mpsc::channel();
                 std::thread::Builder::new()
                     .name("hotview-image".into())
                     .spawn(move || {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let original_dims = probe_image_dimensions(&path);
-                            decode_file_scaled(&path, 8192)
-                                .map(|frame| DecodedImage {
-                                    frame,
-                                    original_dims,
-                                })
-                                .map_err(|err| err.to_string())
-                        }))
-                        .unwrap_or_else(|_| Err("decoder crashed on this file".to_string()));
-                        let _ = tx.send(result);
+                        load_image_worker(path, tx, cancel_rx);
                     })
                     .ok();
                 self.viewer.image_rx = Some(rx);
+                self.viewer.image_animation_cancel = Some(cancel_tx);
             }
             MediaKind::Video => match Player::open(item.path.clone()) {
                 Ok(player) => {
@@ -554,6 +669,14 @@ impl HotviewApp {
     // ------------------------------------------------- transformations & copy
 
     fn rotate_viewer(&mut self, clockwise: bool) {
+        if self.viewer.image_animated {
+            // Keep rotating every incoming animation frame too.
+            self.viewer.image_rot = if clockwise {
+                (self.viewer.image_rot + 1) % 4
+            } else {
+                (self.viewer.image_rot + 3) % 4
+            };
+        }
         if let Some(frame) = &self.viewer.raw_image {
             let rotated = if clockwise {
                 frame.rotate_90_cw()
@@ -575,6 +698,13 @@ impl HotviewApp {
     }
 
     fn flip_viewer(&mut self, horizontal: bool) {
+        if self.viewer.image_animated {
+            if horizontal {
+                self.viewer.image_flip_h = !self.viewer.image_flip_h;
+            } else {
+                self.viewer.image_flip_v = !self.viewer.image_flip_v;
+            }
+        }
         if let Some(frame) = &self.viewer.raw_image {
             let flipped = if horizontal {
                 frame.flip_horizontal()
@@ -597,10 +727,17 @@ impl HotviewApp {
             [frame.width as usize, frame.height as usize],
             &frame.data,
         );
-        let texture = self
-            .ctx
-            .load_texture("viewer-image", image, TextureOptions::LINEAR);
-        self.viewer.image = Some((texture, dims));
+        match &mut self.viewer.image {
+            Some((texture, size)) if *size == dims => {
+                texture.set(image, TextureOptions::LINEAR);
+            }
+            _ => {
+                let texture = self
+                    .ctx
+                    .load_texture("viewer-image", image, TextureOptions::LINEAR);
+                self.viewer.image = Some((texture, dims));
+            }
+        }
         self.viewer.raw_image = Some(frame);
     }
 
@@ -670,26 +807,55 @@ impl HotviewApp {
 
     fn poll_viewer(&mut self) {
         // Image loading.
-        if let Some(rx) = &self.viewer.image_rx {
-            match rx.try_recv() {
+        let image_result = self.viewer.image_rx.as_ref().map(Receiver::try_recv);
+        if let Some(image_result) = image_result {
+            match image_result {
                 Ok(Ok(decoded)) => {
-                    self.viewer.original_dims = decoded
-                        .original_dims
-                        .or(Some((decoded.frame.width, decoded.frame.height)));
-                    self.upload_viewer_image(decoded.frame);
-                    self.viewer.image_rx = None;
-                    self.viewer.zoom_mode = ZoomMode::Contain;
-                    self.viewer.pan = Vec2::ZERO;
+                    let first_frame = self.viewer.image.is_none();
+                    let DecodedImage {
+                        frame,
+                        original_dims,
+                        animated,
+                    } = if decoded.animated {
+                        decoded.transform(
+                            self.viewer.image_rot,
+                            self.viewer.image_flip_h,
+                            self.viewer.image_flip_v,
+                        )
+                    } else {
+                        decoded
+                    };
+                    if first_frame {
+                        self.viewer.original_dims =
+                            original_dims.or(Some((frame.width, frame.height)));
+                    }
+                    self.viewer.image_animated = animated;
+                    self.upload_viewer_image(frame);
+                    if first_frame {
+                        self.viewer.zoom_mode = ZoomMode::Contain;
+                        self.viewer.pan = Vec2::ZERO;
+                    }
+                    if animated {
+                        self.ctx.request_repaint_after(Duration::from_millis(16));
+                    } else {
+                        self.viewer.image_rx = None;
+                        self.viewer.image_animation_cancel = None;
+                    }
                 }
                 Ok(Err(err)) => {
                     self.viewer.image_error = Some(err);
                     self.viewer.image_rx = None;
+                    self.viewer.image_animation_cancel = None;
+                    self.viewer.image_animated = false;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    self.ctx.request_repaint_after(Duration::from_millis(30));
+                    let delay = if self.viewer.image_animated { 16 } else { 30 };
+                    self.ctx.request_repaint_after(Duration::from_millis(delay));
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.viewer.image_rx = None;
+                    self.viewer.image_animation_cancel = None;
+                    self.viewer.image_animated = false;
                 }
             }
         }
