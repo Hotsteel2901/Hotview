@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::{
-    Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, IconData, Pos2, Rect,
-    Stroke, Style, Theme, ThemePreference, Vec2, Visuals,
+    Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, IconData, Mesh, Pos2,
+    Rect, Shadow, Shape, Stroke, Style, Theme, ThemePreference, Vec2, Visuals,
+    style::ScrollStyle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +108,9 @@ fn hotsteel_style(dark: bool) -> Style {
     style.spacing.button_padding = Vec2::new(10.0, 5.0);
     style.spacing.window_margin = egui::Margin::same(14);
     style.spacing.menu_margin = egui::Margin::same(8);
+    // Slim floating scroll bars that expand on hover keep the gallery grid
+    // edge-to-edge and look modern on both light and dark themes.
+    style.spacing.scroll = ScrollStyle::thin();
 
     let mut visuals = if dark {
         Visuals::dark()
@@ -220,6 +224,20 @@ fn hotsteel_style(dark: bool) -> Style {
     visuals.menu_corner_radius = radius_sm;
     visuals.slider_trailing_fill = true;
 
+    // Softer, deeper shadows give the floating windows and menus more depth.
+    visuals.window_shadow = Shadow {
+        offset: [0, 10],
+        blur: 32,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 170 } else { 95 }),
+    };
+    visuals.popup_shadow = Shadow {
+        offset: [0, 5],
+        blur: 18,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 150 } else { 80 }),
+    };
+
     style.visuals = visuals;
     style
 }
@@ -254,6 +272,23 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: Rect, dark: bool) {
             }
         }
     }
+}
+
+/// Fill `rect` with a horizontal left→right linear gradient.
+///
+/// Used for edge fade-outs (e.g. the filmstrip scroll ends) where a plain
+/// solid overlay would leave a hard seam.
+pub fn fill_gradient_lr(painter: &egui::Painter, rect: Rect, left: Color32, right: Color32) {
+    if rect.width() <= 0.5 || rect.height() <= 0.5 {
+        return;
+    }
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(rect.left_top(), left);
+    mesh.colored_vertex(rect.right_top(), right);
+    mesh.colored_vertex(rect.left_bottom(), left);
+    mesh.colored_vertex(rect.right_bottom(), right);
+    mesh.indices.extend_from_slice(&[0, 1, 2, 2, 1, 3]);
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Discover and register system fonts for Symbols, Chinese (Simplified/Traditional),
