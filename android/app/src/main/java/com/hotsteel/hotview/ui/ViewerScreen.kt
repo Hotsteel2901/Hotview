@@ -306,16 +306,20 @@ fun ViewerScreen(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = currentItem?.let { formatDate(it.dateMillis) }.orEmpty(),
+                        text = currentItem?.displayName.orEmpty(),
                         color = Color.White,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "${pagerState.currentPage + 1} / ${items.size}",
+                        text = currentItem?.let {
+                            "${formatDate(it.dateMillis)} · ${pagerState.currentPage + 1} / ${items.size}"
+                        } ?: "${pagerState.currentPage + 1} / ${items.size}",
                         color = Color.White.copy(alpha = 0.78f),
                         style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 IconButton(onClick = { infoItem = currentItem }) {
@@ -450,6 +454,15 @@ fun ViewerScreen(
                             color = Color.White.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.labelMedium,
                         )
+                        currentItem?.let { item ->
+                            if (item.sizeBytes > 0) {
+                                Text(
+                                    text = " · ${humanSize(item.sizeBytes)}",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
                 }
             }

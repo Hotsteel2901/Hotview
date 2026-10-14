@@ -1,6 +1,7 @@
 package com.hotsteel.hotview.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,8 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.hotsteel.hotview.R
 import com.hotsteel.hotview.media.MediaItem
 
 /** Space reserved at the bottom of scrolling grids for the floating bar. */
@@ -98,11 +101,24 @@ fun MediaGrid(
         }
         groups.forEach { (day, dayItems) ->
             item(span = { GridItemSpan(maxLineSpan) }, key = "header-$day") {
-                Text(
-                    text = formatDay(dayItems.first().dateMillis),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(start = 10.dp, top = 16.dp, bottom = 6.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 10.dp, top = 16.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = formatDay(dayItems.first().dateMillis),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(R.string.album_items_count, dayItems.size),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             itemsIndexed(
                 items = dayItems,
@@ -110,12 +126,17 @@ fun MediaGrid(
                 contentType = { _, _ -> "cell" },
             ) { _, item ->
                 RevealOnAppear(index = (absoluteIndex[item.id] ?: 0) % 24) {
+                    val interaction = remember { MutableInteractionSource() }
                     Box(
                         Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { onOpen(absoluteIndex[item.id] ?: 0) },
+                            .pressScale(interaction, pressedScale = 0.93f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(
+                                interactionSource = interaction,
+                                indication = null,
+                            ) { onOpen(absoluteIndex[item.id] ?: 0) },
                     ) {
                         MediaThumb(item = item, modifier = Modifier.fillMaxSize())
                     }

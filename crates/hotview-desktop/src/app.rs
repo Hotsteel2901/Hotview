@@ -6,8 +6,8 @@ use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align2, Color32, ColorImage, CornerRadius, Context, FontId, Id, Key, Margin, Pos2, Rect,
-    RichText, Sense, Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Vec2,
+    Align2, Color32, ColorImage, CornerRadius, Context, FontId, Id, Key, Margin, PointerButton,
+    Pos2, Rect, RichText, Sense, Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Vec2,
     ViewportCommand,
 };
 use hotview_core::{
@@ -22,8 +22,8 @@ use crate::settings::{
     reveal_in_file_manager,
 };
 use crate::theme::{
-    ACCENT_AMBER, ACCENT_COOL, ACCENT_CORAL, ThemeMode, ViewerBg, install_system_fonts,
-    paint_checkerboard,
+    ACCENT_AMBER, ACCENT_COOL, ACCENT_CORAL, ThemeMode, ViewerBg, fill_gradient_lr,
+    install_system_fonts, paint_checkerboard,
 };
 use crate::thumbs::ThumbnailLoader;
 
@@ -31,6 +31,8 @@ const MAX_VISIBLE_ITEMS: usize = 5000;
 const MAX_CACHED_TEXTURES: usize = 1500;
 const EVICT_BATCH: usize = 128;
 const SPEEDS: [f32; 5] = [0.5, 1.0, 1.25, 1.5, 2.0];
+/// Crossfade duration when switching between items in the viewer.
+const CROSSFADE_SECS: f32 = 0.22;
 /// Animated GIF/WebP frames are decoded at up to this many pixels before
 /// being scaled down for the viewer.
 const MAX_ANIMATED_PIXELS: u64 = 64_000_000;
@@ -128,8 +130,20 @@ struct Viewer {
     speed: f32,
     pending_frame: Option<RgbaFrame>,
     zoom: f32,
+    /// Zoom level the view is smoothly animating towards.
+    zoom_target: f32,
+    /// When set, zoom/pan snap to their targets instead of animating
+    /// (used right after opening a new item, where the crossfade carries
+    /// the transition instead).
+    zoom_snap: bool,
     zoom_mode: ZoomMode,
     pan: Vec2,
+    /// Pan offset the view is smoothly animating towards.
+    pan_target: Vec2,
+    /// Previous item's picture, kept briefly for the crossfade transition.
+    fade_prev: Option<(TextureHandle, (u32, u32))>,
+    /// When the crossfade started (only once the new picture is decoded).
+    fade_started: Option<Instant>,
 }
 
 impl Viewer {
@@ -163,8 +177,13 @@ impl Viewer {
             speed: 1.0,
             pending_frame: None,
             zoom: 1.0,
+            zoom_target: 1.0,
+            zoom_snap: false,
             zoom_mode: ZoomMode::Contain,
             pan: Vec2::ZERO,
+            pan_target: Vec2::ZERO,
+            fade_prev: None,
+            fade_started: None,
         }
     }
 }
@@ -247,6 +266,9 @@ pub struct HotviewApp {
     all_items: Vec<Item>,
     visible_indices: Vec<usize>,
     selected_gallery_index: usize,
+    /// Set when keyboard navigation moves the gallery selection so the grid
+    /// can smoothly scroll the newly selected thumbnail into view.
+    scroll_selected_to_view: bool,
     gallery_columns: usize,
     folder: Option<PathBuf>,
     search_query: String,
@@ -255,7 +277,8 @@ pub struct HotviewApp {
     screen: Screen,
     viewer: Viewer,
     thumbs: ThumbnailLoader,
-    textures: HashMap<PathBuf, TextureHandle>,
+    /// Thumbnail textures with the time they were uploaded (for the fade-in).
+    textures: HashMap<PathBuf, (TextureHandle, Instant)>,
     texture_order: VecDeque<PathBuf>,
     failures: HashMap<PathBuf, String>,
     toast: Option<(String, Instant)>,
@@ -283,6 +306,7 @@ impl HotviewApp {
             all_items: Vec::new(),
             visible_indices: Vec::new(),
             selected_gallery_index: 0,
+            scroll_selected_to_view: false,
             gallery_columns: 4,
             folder: None,
             search_query: String::new(),
@@ -559,7 +583,10 @@ impl HotviewApp {
         self.selected_gallery_index = self.viewer.index.min(self.visible_len().saturating_sub(1));
         self.screen = Screen::Gallery;
         self.viewer.player = None;
+        self.viewer.fade_prev = None;
+        self.viewer.fade_started = None;
         self.slideshow = None;
+        self.scroll_selected_to_view = true;
         self.update_window_title();
     }
 
@@ -589,6 +616,20 @@ impl HotviewApp {
         let Some(item) = self.visible_item(self.viewer.index).cloned() else {
             return;
         };
+        // Keep the outgoing picture around so the viewer can crossfade to the
+        // next one once it has been decoded.
+        self.viewer.fade_prev = self
+            .viewer
+            .image
+            .as_ref()
+            .map(|(texture, size)| (texture.clone(), *size))
+            .or_else(|| {
+                self.viewer
+                    .video_texture
+                    .as_ref()
+                    .map(|texture| (texture.clone(), self.viewer.video_size))
+            });
+        self.viewer.fade_started = None;
         self.viewer.raw_image = None;
         self.viewer.original_dims = None;
         self.viewer.image = None;
@@ -613,8 +654,11 @@ impl HotviewApp {
         self.viewer.scrub_us = None;
         self.viewer.pending_frame = None;
         self.viewer.zoom = 1.0;
+        self.viewer.zoom_target = 1.0;
+        self.viewer.zoom_snap = true;
         self.viewer.zoom_mode = ZoomMode::Contain;
         self.viewer.pan = Vec2::ZERO;
+        self.viewer.pan_target = Vec2::ZERO;
 
         match item.kind {
             MediaKind::Image => {
@@ -686,6 +730,7 @@ impl HotviewApp {
             self.upload_viewer_image(rotated);
             self.viewer.zoom_mode = ZoomMode::Contain;
             self.viewer.pan = Vec2::ZERO;
+            self.viewer.pan_target = Vec2::ZERO;
         } else if self.viewer.player.is_some() {
             self.viewer.video_rot = if clockwise {
                 (self.viewer.video_rot + 1) % 4
@@ -694,6 +739,7 @@ impl HotviewApp {
             };
             self.viewer.zoom_mode = ZoomMode::Contain;
             self.viewer.pan = Vec2::ZERO;
+            self.viewer.pan_target = Vec2::ZERO;
         }
     }
 
@@ -793,7 +839,7 @@ impl HotviewApp {
                     if !self.textures.contains_key(&path) {
                         self.texture_order.push_back(path.clone());
                     }
-                    self.textures.insert(path, texture);
+                    self.textures.insert(path, (texture, Instant::now()));
                 }
                 Err(err) => {
                     self.failures.insert(path, err);
@@ -834,6 +880,7 @@ impl HotviewApp {
                     if first_frame {
                         self.viewer.zoom_mode = ZoomMode::Contain;
                         self.viewer.pan = Vec2::ZERO;
+                        self.viewer.pan_target = Vec2::ZERO;
                     }
                     if animated {
                         self.ctx.request_repaint_after(Duration::from_millis(16));
@@ -1008,35 +1055,37 @@ impl HotviewApp {
                         .clicked()
                     {
                         self.viewer.zoom_mode = ZoomMode::Contain;
-                        self.viewer.pan = Vec2::ZERO;
+                        self.viewer.pan_target = Vec2::ZERO;
                     }
                     if ui
                         .selectable_label(self.viewer.zoom_mode == ZoomMode::Cover, tr.fill)
                         .clicked()
                     {
                         self.viewer.zoom_mode = ZoomMode::Cover;
-                        self.viewer.pan = Vec2::ZERO;
+                        self.viewer.pan_target = Vec2::ZERO;
                     }
                     if ui
                         .selectable_label(
                             self.viewer.zoom_mode == ZoomMode::Custom
-                                && (self.viewer.zoom - 1.0).abs() < 0.01,
+                                && (self.viewer.zoom_target - 1.0).abs() < 0.01,
                             tr.actual_size,
                         )
                         .on_hover_text("1")
                         .clicked()
                     {
                         self.viewer.zoom_mode = ZoomMode::Custom;
-                        self.viewer.zoom = 1.0;
-                        self.viewer.pan = Vec2::ZERO;
+                        self.viewer.zoom_target = 1.0;
+                        self.viewer.pan_target = Vec2::ZERO;
                     }
                     if ui.button("−").on_hover_text("Zoom out (-)").clicked() {
                         self.viewer.zoom_mode = ZoomMode::Custom;
-                        self.viewer.zoom = (self.viewer.zoom / 1.25).clamp(0.02, 40.0);
+                        self.viewer.zoom_target =
+                            (self.viewer.zoom_target / 1.25).clamp(0.02, 40.0);
                     }
                     if ui.button("+").on_hover_text("Zoom in (+)").clicked() {
                         self.viewer.zoom_mode = ZoomMode::Custom;
-                        self.viewer.zoom = (self.viewer.zoom * 1.25).clamp(0.02, 40.0);
+                        self.viewer.zoom_target =
+                            (self.viewer.zoom_target * 1.25).clamp(0.02, 40.0);
                     }
 
                     ui.separator();
@@ -1246,9 +1295,57 @@ impl HotviewApp {
                         }
                     }
 
-                    if let Some((message, at)) = &self.toast {
-                        if at.elapsed() < Duration::from_secs(4) {
-                            ui.colored_label(ACCENT_COOL, message);
+                    if let Some((message, at)) = self.toast.clone() {
+                        let elapsed = at.elapsed().as_secs_f32();
+                        const TOAST_LIFE: f32 = 4.0;
+                        if elapsed < TOAST_LIFE {
+                            // Fade the toast in quickly and let it dissolve at
+                            // the end of its life.
+                            let alpha = (elapsed / 0.18)
+                                .clamp(0.0, 1.0)
+                                .min(((TOAST_LIFE - elapsed) / 0.8).clamp(0.0, 1.0));
+                            let font = FontId::proportional(12.5);
+                            let galley = ui.painter().layout_no_wrap(
+                                message,
+                                font,
+                                Color32::from_white_alpha((255.0 * alpha) as u8),
+                            );
+                            let pad = Vec2::new(12.0, 5.0);
+                            let wanted = galley.size() + pad * 2.0;
+                            let (rect, _) = ui.allocate_exact_size(wanted, Sense::hover());
+                            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+                            painter.rect_filled(
+                                rect,
+                                rect.height() / 2.0,
+                                Color32::from_rgba_unmultiplied(
+                                    22,
+                                    24,
+                                    38,
+                                    (205.0 * alpha) as u8,
+                                ),
+                            );
+                            painter.rect_stroke(
+                                rect,
+                                rect.height() / 2.0,
+                                Stroke::new(
+                                    1.0,
+                                    Color32::from_rgba_unmultiplied(
+                                        255,
+                                        166,
+                                        61,
+                                        (150.0 * alpha) as u8,
+                                    ),
+                                ),
+                                StrokeKind::Inside,
+                            );
+                            painter.galley(
+                                rect.center() - galley.size() / 2.0,
+                                galley,
+                                Color32::from_white_alpha((255.0 * alpha) as u8),
+                            );
+                            ui.ctx().request_repaint();
+                        } else {
+                            self.toast = None;
                         }
                     }
                 });
@@ -1623,11 +1720,24 @@ impl HotviewApp {
     fn thumbnail_cell(&mut self, ui: &mut egui::Ui, item: &Item, vis_idx: usize, size: f32) {
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
 
+        // Keyboard navigation: glide the selection into the viewport.
+        if self.scroll_selected_to_view && self.selected_gallery_index == vis_idx {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            self.scroll_selected_to_view = false;
+        }
+
         // Viewport culling: only decode & paint thumbnails that are visible or near the viewport.
         let near_viewport = ui.clip_rect().expand(380.0).intersects(rect);
         if !near_viewport {
             return;
         }
+
+        // Smooth hover "lift": the card grows a hair and brightens as the
+        // pointer moves over it.
+        let hover_t = ui
+            .ctx()
+            .animate_bool_responsive(Id::new(("thumb-hover", item.path.clone())), response.hovered());
+        let paint_rect = rect.expand(hover_t * 2.0);
 
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
         let dark = ui.visuals().dark_mode;
@@ -1636,18 +1746,23 @@ impl HotviewApp {
         } else {
             Color32::from_rgb(232, 226, 216)
         };
-        painter.rect_filled(rect, 10.0, card_bg);
+        painter.rect_filled(paint_rect, 10.0, card_bg);
 
-        if let Some(texture) = self.textures.get(&item.path) {
+        if let Some((texture, born)) = self.textures.get(&item.path) {
+            // Fade freshly decoded thumbnails in instead of popping.
+            let fade = (born.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0);
+            if fade < 1.0 {
+                ui.ctx().request_repaint();
+            }
             painter.image(
                 texture.id(),
-                rect,
-                cover_uv(rect, texture.size()),
-                Color32::WHITE,
+                paint_rect,
+                cover_uv(paint_rect, texture.size()),
+                Color32::from_white_alpha((fade * 255.0) as u8),
             );
         } else if self.failures.contains_key(&item.path) {
             painter.text(
-                rect.center(),
+                paint_rect.center(),
                 Align2::CENTER_CENTER,
                 "⚠",
                 FontId::proportional(22.0),
@@ -1655,18 +1770,14 @@ impl HotviewApp {
             );
         } else {
             self.thumbs.request(&item.path);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "…",
-                FontId::proportional(20.0),
-                Color32::GRAY,
-            );
+            egui::Spinner::new()
+                .size(20.0)
+                .paint_at(ui, paint_rect.shrink(8.0));
         }
 
         if item.kind == MediaKind::Video {
             let badge = Rect::from_min_size(
-                Pos2::new(rect.right() - 36.0, rect.top() + 8.0),
+                Pos2::new(paint_rect.right() - 36.0, paint_rect.top() + 8.0),
                 Vec2::new(28.0, 18.0),
             );
             painter.rect_filled(badge, 5.0, Color32::from_black_alpha(185));
@@ -1680,32 +1791,39 @@ impl HotviewApp {
         }
 
         let selected = self.selected_gallery_index == vis_idx;
-        if response.hovered() || selected {
+        let caption_a = if selected { 1.0 } else { hover_t };
+        if caption_a > 0.01 {
             // Subtle bottom caption bar on hover/selection
             let cap_h = 24.0;
             let cap_rect = Rect::from_min_max(
-                Pos2::new(rect.left(), rect.bottom() - cap_h),
-                rect.max,
+                Pos2::new(paint_rect.left(), paint_rect.bottom() - cap_h),
+                paint_rect.max,
             );
-            painter.rect_filled(cap_rect, 6.0, Color32::from_black_alpha(170));
+            painter.rect_filled(
+                cap_rect,
+                6.0,
+                Color32::from_black_alpha((170.0 * caption_a) as u8),
+            );
             let short_name = truncate_middle(&item.name, (size / 7.5).max(10.0) as usize);
             painter.text(
                 cap_rect.center(),
                 Align2::CENTER_CENTER,
                 short_name,
                 FontId::proportional(11.5),
-                Color32::WHITE,
+                Color32::from_white_alpha((255.0 * caption_a) as u8),
             );
+        }
 
-            let stroke_col = if response.hovered() {
-                ACCENT_AMBER
+        if response.hovered() || selected {
+            let (stroke_col, stroke_w) = if response.hovered() {
+                (ACCENT_AMBER, 1.2 + hover_t * 1.0)
             } else {
-                ACCENT_COOL
+                (ACCENT_COOL, 2.0)
             };
             painter.rect_stroke(
-                rect,
+                paint_rect,
                 10.0,
-                Stroke::new(2.0, stroke_col),
+                Stroke::new(stroke_w, stroke_col),
                 StrokeKind::Inside,
             );
         }
@@ -1781,12 +1899,12 @@ impl HotviewApp {
         if has_valid_size {
             match self.viewer.zoom_mode {
                 ZoomMode::Contain => {
-                    self.viewer.zoom = fit_scale;
-                    self.viewer.pan = Vec2::ZERO;
+                    self.viewer.zoom_target = fit_scale;
+                    self.viewer.pan_target = Vec2::ZERO;
                 }
                 ZoomMode::Cover => {
-                    self.viewer.zoom = fill_scale;
-                    self.viewer.pan = Vec2::ZERO;
+                    self.viewer.zoom_target = fill_scale;
+                    self.viewer.pan_target = Vec2::ZERO;
                 }
                 ZoomMode::Custom => {}
             }
@@ -1797,22 +1915,44 @@ impl HotviewApp {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.01 && has_valid_size {
                 let cursor = response.hover_pos().unwrap_or(rect.center());
-                let old_zoom = self.viewer.zoom.max(1e-4);
+                let old_zoom = self.viewer.zoom_target.max(1e-4);
                 let new_zoom = (old_zoom * (scroll * 0.002).exp())
                     .clamp(fit_scale * 0.05, fit_scale.max(1.0) * 40.0);
-                let center = rect.center() + self.viewer.pan;
-                self.viewer.pan =
+                let center = rect.center() + self.viewer.pan_target;
+                self.viewer.pan_target =
                     center + (cursor - center) * (new_zoom / old_zoom) - rect.center();
-                self.viewer.zoom = new_zoom;
+                self.viewer.zoom_target = new_zoom;
                 self.viewer.zoom_mode = ZoomMode::Custom;
             }
         }
         if response.dragged() {
+            // Direct manipulation: the picture follows the cursor 1:1.
             self.viewer.pan += response.drag_delta();
+            self.viewer.pan_target = self.viewer.pan;
         }
         if response.middle_clicked() {
             self.viewer.zoom_mode = ZoomMode::Contain;
             self.viewer.pan = Vec2::ZERO;
+            self.viewer.pan_target = Vec2::ZERO;
+        }
+
+        // Smoothly glide zoom/pan towards their targets for a fluid feel.
+        if has_valid_size {
+            if self.viewer.zoom_snap {
+                self.viewer.zoom = self.viewer.zoom_target;
+                self.viewer.pan = self.viewer.pan_target;
+                self.viewer.zoom_snap = false;
+            } else {
+                let dt = ui.input(|i| i.unstable_dt).clamp(0.0, 0.1);
+                let blend = 1.0 - (-18.0_f32 * dt).exp();
+                self.viewer.zoom += (self.viewer.zoom_target - self.viewer.zoom) * blend;
+                self.viewer.pan += (self.viewer.pan_target - self.viewer.pan) * blend;
+                if (self.viewer.zoom_target - self.viewer.zoom).abs() > 0.0005
+                    || (self.viewer.pan_target - self.viewer.pan).length() > 0.2
+                {
+                    ui.ctx().request_repaint();
+                }
+            }
         }
 
         let image_size = Vec2::new(size.0 as f32, size.1 as f32);
@@ -1821,6 +1961,55 @@ impl HotviewApp {
         let max_y = ((display.y - rect.height()) / 2.0).max(0.0);
         self.viewer.pan.x = self.viewer.pan.x.clamp(-max_x, max_x);
         self.viewer.pan.y = self.viewer.pan.y.clamp(-max_y, max_y);
+        let display_target = image_size * self.viewer.zoom_target;
+        let max_tx = ((display_target.x - rect.width()) / 2.0).max(0.0);
+        let max_ty = ((display_target.y - rect.height()) / 2.0).max(0.0);
+        self.viewer.pan_target.x = self.viewer.pan_target.x.clamp(-max_tx, max_tx);
+        self.viewer.pan_target.y = self.viewer.pan_target.y.clamp(-max_ty, max_ty);
+
+        // Crossfade progress: the previous picture holds the screen until the
+        // next one is decoded, then dissolves into it.
+        if texture_id.is_some() && self.viewer.fade_prev.is_some() && self.viewer.fade_started.is_none()
+        {
+            self.viewer.fade_started = Some(Instant::now());
+        }
+        let mut fade_prev_alpha = 0.0_f32;
+        let mut fade_new_alpha = 1.0_f32;
+        if self.viewer.fade_prev.is_some() {
+            let progress = self
+                .viewer
+                .fade_started
+                .map(|started| started.elapsed().as_secs_f32() / CROSSFADE_SECS)
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            if progress >= 1.0 {
+                self.viewer.fade_prev = None;
+                self.viewer.fade_started = None;
+            } else {
+                let eased = progress * progress * (3.0 - 2.0 * progress);
+                fade_prev_alpha = 1.0 - eased;
+                fade_new_alpha = eased;
+                ui.ctx().request_repaint();
+            }
+        }
+
+        if fade_prev_alpha > 0.0 {
+            if let Some((prev_texture, prev_size)) = self.viewer.fade_prev.clone() {
+                let prev_dims = Vec2::new(prev_size.0 as f32, prev_size.1 as f32);
+                if prev_dims.x > 0.0 && prev_dims.y > 0.0 && rect.width() > 1.0 && rect.height() > 1.0
+                {
+                    let prev_fit = (rect.width() / prev_dims.x).min(rect.height() / prev_dims.y);
+                    let prev_rect =
+                        Rect::from_center_size(rect.center(), prev_dims * prev_fit);
+                    painter.image(
+                        prev_texture.id(),
+                        prev_rect,
+                        Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                        Color32::from_white_alpha((fade_prev_alpha * 255.0) as u8),
+                    );
+                }
+            }
+        }
 
         if let Some(texture_id) = texture_id {
             let image_rect = Rect::from_center_size(rect.center() + self.viewer.pan, display);
@@ -1831,22 +2020,34 @@ impl HotviewApp {
                 texture_id,
                 image_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+                Color32::from_white_alpha((fade_new_alpha * 255.0) as u8),
             );
         } else if let Some(error) = &self.viewer.image_error {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                error,
-                FontId::proportional(15.0),
-                ACCENT_CORAL,
+            // Keep the error readable on top of any picture still on screen.
+            let font = FontId::proportional(15.0);
+            let galley = painter.layout_no_wrap(error.clone(), font, ACCENT_CORAL);
+            let pad = Vec2::new(16.0, 10.0);
+            let box_rect =
+                Rect::from_center_size(rect.center(), galley.size() + pad * 2.0);
+            painter.rect_filled(box_rect, 12.0, Color32::from_black_alpha(170));
+            painter.rect_stroke(
+                box_rect,
+                12.0,
+                Stroke::new(1.0, ACCENT_CORAL),
+                StrokeKind::Inside,
             );
-        } else {
+            painter.galley(box_rect.min + pad, galley, ACCENT_CORAL);
+        } else if fade_prev_alpha <= 0.0 {
+            // Animated loading spinner (kept under the held previous picture).
+            let spinner_rect = Rect::from_center_size(rect.center(), Vec2::splat(34.0));
+            egui::Spinner::new()
+                .size(34.0)
+                .paint_at(ui, spinner_rect);
             painter.text(
-                rect.center(),
+                rect.center() + Vec2::new(0.0, 34.0),
                 Align2::CENTER_CENTER,
                 tr.loading,
-                FontId::proportional(16.0),
+                FontId::proportional(13.0),
                 Color32::GRAY,
             );
         }
@@ -1910,13 +2111,13 @@ impl HotviewApp {
                 let old_zoom = self.viewer.zoom.max(1e-4);
                 let target_zoom = (fit_scale * 2.25).max(1.0);
                 let center = rect.center() + self.viewer.pan;
-                self.viewer.pan =
+                self.viewer.pan_target =
                     center + (cursor - center) * (target_zoom / old_zoom) - rect.center();
-                self.viewer.zoom = target_zoom;
+                self.viewer.zoom_target = target_zoom;
                 self.viewer.zoom_mode = ZoomMode::Custom;
             } else {
                 self.viewer.zoom_mode = ZoomMode::Contain;
-                self.viewer.pan = Vec2::ZERO;
+                self.viewer.pan_target = Vec2::ZERO;
             }
         } else if !nav_clicked && response.clicked() && self.viewer.player.is_some() {
             // Single click on video toggles play/pause.
@@ -1974,6 +2175,7 @@ impl HotviewApp {
         let mut clicked_index: Option<usize> = None;
 
         egui::Panel::bottom(Id::new("hotview-filmstrip")).show(ui, |ui| {
+            let strip_rect = ui.max_rect();
             ui.add_space(4.0);
             egui::ScrollArea::horizontal()
                 .auto_shrink([false, false])
@@ -1987,24 +2189,36 @@ impl HotviewApp {
                             let (rect, resp) =
                                 ui.allocate_exact_size(Vec2::splat(thumb_size), Sense::click());
                             let painter = ui.painter().with_clip_rect(ui.clip_rect());
-                            painter.rect_filled(rect, 6.0, Color32::from_gray(28));
-                            if let Some(tex) = self.textures.get(&item.path) {
+                            let is_active = vis_idx == self.viewer.index;
+                            let draw_rect = if is_active {
+                                rect.expand(2.5)
+                            } else {
+                                rect
+                            };
+                            painter.rect_filled(draw_rect, 7.0, Color32::from_gray(28));
+                            if let Some((tex, _)) = self.textures.get(&item.path) {
+                                let tint = if is_active {
+                                    Color32::WHITE
+                                } else {
+                                    // Dim the inactive frames so the current one
+                                    // stands out in the strip.
+                                    Color32::from_white_alpha(210)
+                                };
                                 painter.image(
                                     tex.id(),
-                                    rect,
-                                    cover_uv(rect, tex.size()),
-                                    Color32::WHITE,
+                                    draw_rect,
+                                    cover_uv(draw_rect, tex.size()),
+                                    tint,
                                 );
                             } else {
                                 self.thumbs.request(&item.path);
                             }
-                            let is_active = vis_idx == self.viewer.index;
                             if is_active || resp.hovered() {
                                 let col = if is_active { ACCENT_AMBER } else { ACCENT_COOL };
                                 painter.rect_stroke(
-                                    rect,
-                                    6.0,
-                                    Stroke::new(if is_active { 2.2 } else { 1.5 }, col),
+                                    draw_rect,
+                                    7.0,
+                                    Stroke::new(if is_active { 2.4 } else { 1.5 }, col),
                                     StrokeKind::Inside,
                                 );
                             }
@@ -2015,6 +2229,30 @@ impl HotviewApp {
                     });
                 });
             ui.add_space(4.0);
+
+            // Soft edge fades hint that the strip scrolls sideways.
+            let panel_fill = ui.visuals().panel_fill;
+            let fade_w = 30.0;
+            let left_rect = Rect::from_min_max(
+                strip_rect.left_top(),
+                Pos2::new((strip_rect.left() + fade_w).min(strip_rect.right()), strip_rect.bottom()),
+            );
+            let right_rect = Rect::from_min_max(
+                Pos2::new((strip_rect.right() - fade_w).max(strip_rect.left()), strip_rect.top()),
+                strip_rect.right_bottom(),
+            );
+            fill_gradient_lr(
+                ui.painter(),
+                left_rect,
+                panel_fill,
+                panel_fill.gamma_multiply(0.0),
+            );
+            fill_gradient_lr(
+                ui.painter(),
+                right_rect,
+                panel_fill.gamma_multiply(0.0),
+                panel_fill,
+            );
         });
 
         if let Some(idx) = clicked_index {
@@ -2362,6 +2600,8 @@ impl eframe::App for HotviewApp {
                     escape,
                     left,
                     right,
+                    back_btn,
+                    forward_btn,
                     space,
                     fit,
                     one,
@@ -2384,6 +2624,8 @@ impl eframe::App for HotviewApp {
                         i.key_pressed(Key::Escape) || i.key_pressed(Key::Backspace),
                         i.key_pressed(Key::ArrowLeft),
                         i.key_pressed(Key::ArrowRight),
+                        i.pointer.button_clicked(PointerButton::Extra1),
+                        i.pointer.button_clicked(PointerButton::Extra2),
                         i.key_pressed(Key::Space),
                         no_cmd && (i.key_pressed(Key::F) || i.key_pressed(Key::Num0)),
                         no_cmd && i.key_pressed(Key::Num1),
@@ -2413,6 +2655,11 @@ impl eframe::App for HotviewApp {
                     self.step(-1);
                 } else if right {
                     self.step(1);
+                } else if back_btn {
+                    // Mouse thumb buttons navigate like ← / →.
+                    self.step(-1);
+                } else if forward_btn {
+                    self.step(1);
                 } else if space {
                     if let Some(player) = &self.viewer.player {
                         if self.viewer.playing {
@@ -2423,17 +2670,17 @@ impl eframe::App for HotviewApp {
                     }
                 } else if fit {
                     self.viewer.zoom_mode = ZoomMode::Contain;
-                    self.viewer.pan = Vec2::ZERO;
+                    self.viewer.pan_target = Vec2::ZERO;
                 } else if one {
                     self.viewer.zoom_mode = ZoomMode::Custom;
-                    self.viewer.zoom = 1.0;
-                    self.viewer.pan = Vec2::ZERO;
+                    self.viewer.zoom_target = 1.0;
+                    self.viewer.pan_target = Vec2::ZERO;
                 } else if plus {
                     self.viewer.zoom_mode = ZoomMode::Custom;
-                    self.viewer.zoom = (self.viewer.zoom * 1.25).clamp(0.02, 40.0);
+                    self.viewer.zoom_target = (self.viewer.zoom_target * 1.25).clamp(0.02, 40.0);
                 } else if minus {
                     self.viewer.zoom_mode = ZoomMode::Custom;
-                    self.viewer.zoom = (self.viewer.zoom / 1.25).clamp(0.02, 40.0);
+                    self.viewer.zoom_target = (self.viewer.zoom_target / 1.25).clamp(0.02, 40.0);
                 } else if rot_cw {
                     self.rotate_viewer(true);
                 } else if rot_ccw {
@@ -2500,19 +2747,25 @@ impl eframe::App for HotviewApp {
                     if left {
                         self.selected_gallery_index =
                             self.selected_gallery_index.saturating_sub(1);
+                        self.scroll_selected_to_view = true;
                     } else if right {
                         self.selected_gallery_index =
                             (self.selected_gallery_index + 1).min(count - 1);
+                        self.scroll_selected_to_view = true;
                     } else if up {
                         self.selected_gallery_index =
                             self.selected_gallery_index.saturating_sub(cols);
+                        self.scroll_selected_to_view = true;
                     } else if down {
                         self.selected_gallery_index =
                             (self.selected_gallery_index + cols).min(count - 1);
+                        self.scroll_selected_to_view = true;
                     } else if home {
                         self.selected_gallery_index = 0;
+                        self.scroll_selected_to_view = true;
                     } else if end {
                         self.selected_gallery_index = count - 1;
+                        self.scroll_selected_to_view = true;
                     } else if enter {
                         self.open_viewer(self.selected_gallery_index);
                     }
