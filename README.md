@@ -14,6 +14,31 @@ Android 端使用 **wgpu(Vulkan) + NDK MediaCodec 硬件解码**，UI 分别是 
 
 ---
 
+## 安装
+
+所有安装包由 `Release` 工作流构建，版本号与 tag 同步（`v1.MM.PP`）。
+
+| 平台 | 文件 | 安装 |
+| --- | --- | --- |
+| Arch Linux | `hotview-<ver>-1-x86_64.pkg.tar.zst` | `sudo pacman -U hotview-<ver>-1-x86_64.pkg.tar.zst` |
+| Debian 13 (trixie) amd64 | `hotview_<ver>_amd64.deb` | `sudo apt install ./hotview_<ver>_amd64.deb` |
+| Windows x64 | `Hotview-<ver>-x64-setup.exe` | 双击安装（按用户安装，无需管理员权限） |
+| macOS Apple Silicon | `Hotview-<ver>-arm64.dmg` | 拖入「应用程序」 |
+| macOS Intel | `Hotview-<ver>-x86_64.dmg` | 拖入「应用程序」 |
+| Android 8+ | `hotview-android-<ver>.apk` | 直接安装（release 签名） |
+
+- Linux 包会通过包管理器自动拉取 `ffmpeg` / `alsa-lib` 等运行库，装好即可在应用菜单打开；
+  同时注册 `image/*`、`video/*` 的「打开方式」、桌面图标和 AppStream 元数据。
+- Windows 安装包包含完整 FFmpeg / MinGW DLL 闭包，注册开始菜单、桌面快捷方式、
+  「打开方式」与卸载项；不会抢占已有默认程序。安装包未做代码签名，SmartScreen 若提示
+  「未知发布者」，点「更多信息 → 仍要运行」即可。
+- macOS 包内置 FFmpeg 动态库，但未做 Apple 公证：第一次打开需在「应用程序」中右键 → 打开，
+  或在 系统设置 → 隐私与安全性 中点击「仍要打开」（DMG 内附 `INSTALL.txt`）。
+- 版本号由提交数推导（tag = `10000 + commits`），Android 的 `versionCode` 也使用同一个提交数，
+  因此后续 APK 可以覆盖升级。
+
+---
+
 ## 特性
 
 ### 通用
@@ -40,7 +65,9 @@ Android 端使用 **wgpu(Vulkan) + NDK MediaCodec 硬件解码**，UI 分别是 
 - **动图播放**：GIF / 动画 WebP 在查看器内按帧延迟循环播放，缩放 / 平移 / 旋转 / 翻转同样作用于动图
 - **视频播放**：播放/暂停、丝滑拖拽/点击进度条、`-5s` / `+5s` 快退快进、循环播放、静音（`M`）与音量滑块、倍速播放（`0.5×`–`2.0×`）、自适应系统音频采样率与声道数
 - **动效与手感**：切换图片交叉淡化转场、缩放 / 平移丝滑缓动（滚轮、双击、Fit / 1:1 全部带过渡）、缩略图悬停抬升与解码淡入、加载动画指示、Toast 胶囊淡入淡出、胶片条当前帧高亮与两侧滚动渐隐、浮动细滚动条与柔和窗口阴影
-- **跨平台体验**：打开单文件时自动载入同目录相邻媒体、拖拽文件/目录视觉引导遮罩、配置自动持久化、无黑框的 Windows 打包产物（内含完整 FFmpeg 运行库闭包）与签名完整的 macOS / Linux 产物
+- **跨平台体验**：打开单文件时自动载入同目录相邻媒体、拖拽文件/目录视觉引导遮罩、配置自动持久化；
+  Windows 提供按用户安装的 Setup（含完整 FFmpeg / MinGW DLL 闭包），macOS 提供内置 FFmpeg 的 `.app` + DMG，
+  Linux 提供 pacman 与 `.deb` 安装包
 
 ### Android 端（Compose + M3 Expressive）
 - **Material 3 Expressive**：`MaterialExpressiveTheme` + `MotionScheme.expressive()`，
@@ -49,7 +76,8 @@ Android 端使用 **wgpu(Vulkan) + NDK MediaCodec 硬件解码**，UI 分别是 
 - **液态玻璃悬浮底栏**：Haze 2 实时模糊 + 滑动指示器 + 拖拽切换 + 按压回弹
 - **图标**：自适应图标（前景光圈 + 火焰，夜景渐变背景）+ **monochrome 单色层**，
   Android 13+ 上跟随壁纸实现 MD3E 动态取色（Material You 主题图标）
-- **动效**：页面切换共享动效、缩略图错落进场、卡片按压缩放、渐变骨架屏、
+- **动效**：页面切换共享动效、缩略图首次进场从空白错落浮现（已加载过的缩略图
+  在回滚/下滑再次出现时只做轻微依次抖动，不再重播空白淡入）、卡片按压缩放、渐变骨架屏、
   查看器分页缩放淡入、预测性返回（手势进度驱动缩放）、播放/暂停图标弹性切换、
   线性签名绘制动画
 - **相册体验**：按日期分组的网格（带当日条目计数）、缩略图按压回弹、视频时长角标、信息面板、
@@ -96,9 +124,16 @@ crates/
 android/
   rust/           # JNI bridge + 渲染线程（cdylib: libhotview_android.so）
   app/            # Kotlin / Compose 应用
+packaging/
+  linux/          # .pkg.tar.zst / .deb 打包脚本 + desktop entry + AppStream
+  macos/          # .app / .dmg 打包脚本 + Info.plist
+  windows/        # NSIS 安装包脚本
+  icons/          # 各平台图标（PNG / ICO / 构建 ICNS 用母版）
 .github/workflows/
-  desktop.yml     # Windows / macOS(arm64, x86_64) / Linux
-  android.yml     # debug APK / release APK / release AAB
+  desktop.yml     # Arch 包 / .deb / macOS DMG / Windows Setup
+  android.yml     # release APK（可选 AAB）
+  release.yml     # 一键构建全部产物并发布 Release
+  pages.yml       # 落地页
 ```
 
 渲染管线：解码器输出 `MediaFrame`（RGBA 或 YUV 4:2:0），
@@ -110,11 +145,12 @@ android/
 ## 桌面端构建
 
 依赖：Rust stable、FFmpeg 开发库、pkg-config；Linux 额外需要 ALSA 开发库。
+（只用到 FFmpeg 的 decode / format / swscale / swresample，avfilter 与 avdevice 已关闭。）
 
 ```bash
 # Linux (Debian/Ubuntu)
 sudo apt install pkg-config libavcodec-dev libavformat-dev libavutil-dev \
-     libswscale-dev libswresample-dev libavfilter-dev libavdevice-dev libasound2-dev
+     libswscale-dev libswresample-dev libasound2-dev
 
 # macOS
 brew install ffmpeg pkg-config
@@ -129,9 +165,24 @@ cargo build --release -p hotview-desktop
 ./target/release/hotview            # 或 hotview <文件/目录>
 ```
 
-CI（`.github/workflows/desktop.yml`）会自动为以下平台出包：
-`hotview-linux-x86_64.tar.gz`、`hotview-macos-arm64.tar.gz`、`hotview-macos-x86_64.tar.gz`、
-`hotview-windows-x86_64.zip`（Windows 包内含所需 DLL）。
+### 打安装包
+
+```bash
+# Linux：先 cargo build --release，再按目标发行版打包
+sh ./packaging/linux/package.sh arch      # -> dist/hotview-<ver>-1-x86_64.pkg.tar.zst
+sh ./packaging/linux/package.sh debian    # -> dist/hotview_<ver>_amd64.deb
+
+# macOS（必须在 macOS 上执行；需要 dylibbundler）
+sh ./packaging/macos/package.sh arm64     # -> dist/Hotview-<ver>-arm64.dmg
+
+# Windows（必须在 Windows 上执行；需要 NSIS）
+# 先把 hotview.exe + 全部 DLL 放进 dist/windows/app，然后：
+makensis -DVERSION=<ver> -DAPPDIR=<绝对路径> -DOUTFILE=<绝对路径> packaging/windows/installer.nsi
+```
+
+CI（`.github/workflows/desktop.yml`）会在目标发行版容器里构建 Arch / Debian 包
+（保证 ffmpeg 与 glibc ABI 匹配），在 macOS 上生成内置 FFmpeg 的 `.app` + DMG，
+在 Windows 上生成按用户安装的 NSIS Setup 与 portable zip。
 
 ## Android 构建
 
@@ -158,7 +209,19 @@ ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358 ./gradlew :app:assembleDebug
   或使用已 gitignore 的 `android/keystore.properties`。
 - 细节见 [`android/keystore/README.md`](android/keystore/README.md)。
 
-CI（`.github/workflows/android.yml`）会产出 debug APK、release APK 与 release AAB。
+CI（`.github/workflows/android.yml`）只跑一次 Rust 三 ABI 构建，产出 release APK；
+需要 Play Store 包时手动触发并勾选 `build_aab`。
+CI 通过 `-PversionCode` / `-PversionName`（也兼容 `HOTVIEW_VERSION_CODE` /
+`HOTVIEW_VERSION_NAME` 环境变量）注入提交数版本，保证覆盖升级的 versionCode 递增。
+
+### CI 用量
+
+- `desktop.yml` 与 `android.yml` 只手动触发，普通提交不会构建；
+- Android 从 3 个 job（debug APK / release APK / AAB，各编译一遍 Rust）合并为 1 个 job，
+  AAB 默认不构建，`cargo-ndk` 二进制与 Rust 缓存复用；
+- macOS Intel 构建（10x runner 计费）在手动/Release 运行时可关；
+- Linux 包在目标发行版容器里各构建一次（Arch / Debian 13），保证 FFmpeg ABI 正确；
+- 所有构建 job 都有 `timeout-minutes` 与 `concurrency`，重复触发会取消旧运行。
 
 ## 已知限制
 

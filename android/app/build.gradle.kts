@@ -22,6 +22,17 @@ val signingProperties = Properties().apply {
 fun signingValue(property: String, env: String, fallback: String? = null): String? =
     signingProperties.getProperty(property) ?: System.getenv(env) ?: fallback
 
+// CI passes both values from the same commit count used by the desktop
+// packages, so release upgrades keep increasing versionCode. Using Gradle
+// properties (rather than reading env vars deep in a block) also keeps the
+// configuration cache honest.
+val buildVersionCode = project.providers.gradleProperty("versionCode").orNull?.toIntOrNull()
+    ?: System.getenv("HOTVIEW_VERSION_CODE")?.toIntOrNull()
+    ?: 1
+val buildVersionName = project.providers.gradleProperty("versionName").orNull
+    ?: System.getenv("HOTVIEW_VERSION_NAME")
+    ?: "1.0.0"
+
 fun SigningConfig.applyKeystore(pathProperty: String, pathEnv: String) {
     val path = signingValue(pathProperty, pathEnv) ?: return
     val file = rootProject.file(path)
@@ -43,8 +54,8 @@ android {
         applicationId = "com.hotsteel.hotview"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")

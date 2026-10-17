@@ -4,6 +4,10 @@
 Cargo.lock
 !Cargo.lock
 
+# Packaging output / CI container caches
+/dist/
+/.ci/
+
 # Android / Gradle
 android/.gradle/
 android/build/

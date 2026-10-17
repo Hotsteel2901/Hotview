@@ -1,69 +1,163 @@
 name: Desktop
 
+# Builds installable packages:
+#   Linux   hotview-<ver>-1-x86_64.pkg.tar.zst (Arch) and hotview_<ver>_amd64.deb (Debian)
+#   macOS   Hotview-<ver>-arm64.dmg / Hotview-<ver>-x86_64.dmg
+#   Windows Hotview-<ver>-x64-setup.exe (+ portable zip)
+#
+# Manual runs are the default: nothing is rebuilt on ordinary pushes.
 on:
-  # Manual only: run it from the Actions tab (or `gh workflow run desktop.yml`).
   workflow_dispatch:
-  # Also callable from release.yml (tag + GitHub Release).
+    inputs:
+      macos_intel:
+        description: "Also build the Intel (x86_64) macOS DMG"
+        type: boolean
+        default: true
   workflow_call:
+    inputs:
+      macos_intel:
+        description: "Also build the Intel (x86_64) macOS DMG"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
-  linux:
-    name: Linux x86_64
-    runs-on: ubuntu-26.04
+  # -------------------------------------------------------------------------
+  # Linux: one native build per package format. Building inside the target
+  # distribution (instead of cross-packaging an Ubuntu binary) keeps the
+  # ffmpeg/glibc/ABI dependencies exactly right for pacman and dpkg.
+  # -------------------------------------------------------------------------
+  linux-arch:
+    name: Linux · Arch package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          # packaging/version.sh derives the version from the commit count.
+          fetch-depth: 0
 
-      - name: Install system dependencies
+      - name: Cache Cargo build
+        uses: actions/cache@v6
+        with:
+          path: |
+            target
+            .ci
+          key: linux-arch-${{ hashFiles('Cargo.lock', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            linux-arch-
+
+      - name: Build inside Arch Linux
+        run: |
+          docker run --rm \
+            -v "$PWD":/src -w /src \
+            archlinux:base-devel \
+            sh packaging/ci/arch-build.sh
+          # The build runs as root inside the container; hand the cache back
+          # to the runner user so actions/cache can save it.
+          sudo chown -R "$(id -u):$(id -g)" target .ci 2>/dev/null || true
+
+      - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config \
-            libavcodec-dev libavformat-dev libavutil-dev \
-            libswscale-dev libswresample-dev libavfilter-dev libavdevice-dev \
-            libasound2-dev
+          sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: linux-x86_64
-
-      - name: Build
-        run: cargo build --release -p hotview-desktop
-
-      - name: Package
+      - name: Package .pkg.tar.zst
         run: |
-          mkdir -p dist
-          cp target/release/hotview dist/
-          cp README.md LICENSE dist/
-          tar -C dist -czf hotview-linux-x86_64.tar.gz .
+          VERSION=$(sh packaging/version.sh)
+          echo "HOTVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          HOTVIEW_VERSION="$VERSION" sh ./packaging/linux/package.sh arch
+
+      - name: Verify package with pacman
+        run: |
+          docker run --rm -v "$PWD":/src archlinux:base-devel \
+            bash -c 'pacman -Qp /src/dist/*.pkg.tar.zst && pacman -Qip /src/dist/*.pkg.tar.zst >/dev/null'
 
       - uses: actions/upload-artifact@v7
         with:
-          name: hotview-linux-x86_64
-          path: hotview-linux-x86_64.tar.gz
+          name: hotview-linux-arch
+          path: dist/*.pkg.tar.zst
           if-no-files-found: error
 
+  linux-deb:
+    name: Linux · Debian package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # packaging/version.sh derives the version from the commit count.
+          fetch-depth: 0
+
+      - name: Cache Cargo build
+        uses: actions/cache@v6
+        with:
+          path: |
+            target
+            .ci
+          key: linux-deb-${{ hashFiles('Cargo.lock', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            linux-deb-
+
+      - name: Build inside Debian 13 (trixie)
+        run: |
+          docker run --rm \
+            -v "$PWD":/src -w /src \
+            debian:trixie \
+            sh packaging/ci/debian-build.sh
+          sudo chown -R "$(id -u):$(id -g)" target .ci 2>/dev/null || true
+
+      - name: Package .deb
+        run: |
+          VERSION=$(sh packaging/version.sh)
+          echo "HOTVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          HOTVIEW_VERSION="$VERSION" HOTVIEW_DEB_ARCH=amd64 \
+            sh ./packaging/linux/package.sh debian
+
+      - name: Verify package with dpkg-deb
+        run: |
+          docker run --rm -v "$PWD":/src debian:trixie \
+            bash -c 'dpkg-deb --info /src/dist/*.deb && dpkg-deb --contents /src/dist/*.deb >/dev/null'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hotview-linux-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # macOS: .app bundles with FFmpeg inside, shipped as drag-to-Applications
+  # DMGs. Intel is optional (macOS runners are billed at 10x).
+  # -------------------------------------------------------------------------
   macos:
-    name: macOS ${{ matrix.arch }}
+    name: macOS · ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-latest      # Apple silicon
-            arch: arm64
-          - runner: macos-26-intel    # Intel
-            arch: x86_64
+        # The arm64 build always runs; the Intel one can be switched off for
+        # manual runs to save macOS minutes. `matrix` is not available in a
+        # job-level `if`, so build the include list from the input instead.
+        include: ${{ fromJSON(inputs.macos_intel && '[{"runner":"macos-latest","arch":"arm64"},{"runner":"macos-26-intel","arch":"x86_64"}]' || '[{"runner":"macos-latest","arch":"arm64"}]') }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and dylibbundler
         run: |
-          brew install ffmpeg pkg-config
+          brew install ffmpeg pkg-config dylibbundler
           echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -73,40 +167,46 @@ jobs:
           key: macos-${{ matrix.arch }}
 
       - name: Build
-        run: cargo build --release -p hotview-desktop
+        env:
+          # Do not stamp the runner's macOS version into the binary; the real
+          # floor is computed from the binary + bundled dylibs in package.sh.
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+        run: cargo build --release --locked -p hotview-desktop
 
-      - name: Bundle FFmpeg dylibs
+      - name: Build .app and .dmg
         run: |
-          brew install dylibbundler
-          mkdir -p dist
-          cp target/release/hotview dist/
-          cp README.md LICENSE dist/
-          dylibbundler -od -b -x dist/hotview -d dist/libs \
-            -p @executable_path/libs/ \
-            -s /opt/homebrew/lib -s /usr/local/lib
-          for dylib in dist/libs/*.dylib; do
-            [ -f "$dylib" ] && codesign --force --sign - "$dylib"
-          done
-          codesign --force --sign - dist/hotview
+          VERSION=$(sh packaging/version.sh)
+          echo "HOTVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          HOTVIEW_VERSION="$VERSION" sh ./packaging/macos/package.sh "${{ matrix.arch }}"
 
-      - name: Package
+      - name: Verify bundle
         run: |
-          tar -C dist -czf hotview-macos-${{ matrix.arch }}.tar.gz .
+          hdiutil verify dist/*.dmg
+          MOUNT=$(hdiutil attach -nobrowse -readonly dist/*.dmg |
+            sed -n 's#^.*\(/Volumes/.*\)$#\1#p' | head -n 1)
+          codesign --verify --deep --strict "$MOUNT/Hotview.app"
+          hdiutil detach "$MOUNT" -quiet
 
       - uses: actions/upload-artifact@v7
         with:
           name: hotview-macos-${{ matrix.arch }}
-          path: hotview-macos-${{ matrix.arch }}.tar.gz
+          path: dist/*.dmg
           if-no-files-found: error
 
+  # -------------------------------------------------------------------------
+  # Windows: per-user NSIS installer (no admin rights) plus a portable zip.
+  # -------------------------------------------------------------------------
   windows:
-    name: Windows x86_64
+    name: Windows · installer
     runs-on: windows-2025
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install FFmpeg (MSYS2 / MinGW)
         shell: cmd
@@ -128,35 +228,74 @@ jobs:
           PKG_CONFIG_PATH: C:\msys64\mingw64\lib\pkgconfig
         run: |
           export PATH="/c/msys64/mingw64/bin:$PATH"
-          cargo build --release -p hotview-desktop --target x86_64-pc-windows-gnu
+          cargo build --release --locked -p hotview-desktop --target x86_64-pc-windows-gnu
 
-      - name: Package
+      - name: Stage portable app
         run: |
           export PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH"
-          mkdir -p dist
-          cp target/x86_64-pc-windows-gnu/release/hotview.exe dist/
-          cp README.md LICENSE dist/
+          APP_DIR="$PWD/dist/windows/app"
+          mkdir -p "$APP_DIR"
+          cp target/x86_64-pc-windows-gnu/release/hotview.exe "$APP_DIR/"
+          cp README.md LICENSE packaging/icons/hotview.ico "$APP_DIR/"
           for pattern in avcodec-*.dll avdevice-*.dll avfilter-*.dll avformat-*.dll avutil-*.dll swresample-*.dll swscale-*.dll; do
-            cp C:/msys64/mingw64/bin/$pattern dist/ 2>/dev/null || true
+            cp C:/msys64/mingw64/bin/$pattern "$APP_DIR/" 2>/dev/null || true
           done
+          # Follow the DLL import graph so libgcc/libstdc++/zlib etc. are
+          # included as well; the installer must not depend on MSYS2.
           while true; do
             added=0
-            for bin in dist/*.exe dist/*.dll; do
+            for bin in "$APP_DIR"/*.exe "$APP_DIR"/*.dll; do
               [ -f "$bin" ] || continue
               for dep in $(objdump -p "$bin" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
-                if [ ! -f "dist/$dep" ] && [ -f "C:/msys64/mingw64/bin/$dep" ]; then
-                  cp "C:/msys64/mingw64/bin/$dep" dist/
+                if [ ! -f "$APP_DIR/$dep" ] && [ -f "C:/msys64/mingw64/bin/$dep" ]; then
+                  cp "C:/msys64/mingw64/bin/$dep" "$APP_DIR/"
                   added=1
                 fi
               done
             done
             [ "$added" -eq 0 ] && break
           done
-          ls -la dist/avcodec-*.dll
-          7z a hotview-windows-x86_64.zip ./dist/*
+          VERSION=$(sh packaging/version.sh)
+          echo "HOTVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          ZIP_PATH="$PWD/dist/Hotview-${VERSION}-windows-x86_64-portable.zip"
+          (cd "$APP_DIR" && 7z a -tzip -mx=9 "$ZIP_PATH" . >/dev/null)
+          ls -la "$APP_DIR"
+
+      - name: Build NSIS installer
+        run: |
+          set -e
+          NSIS=""
+          for candidate in \
+            "/c/Program Files (x86)/NSIS/makensis.exe" \
+            "/c/Program Files/NSIS/makensis.exe"; do
+            if [ -x "$candidate" ]; then NSIS="$candidate"; break; fi
+          done
+          if [ -z "$NSIS" ]; then
+            choco install nsis -y --no-progress
+            NSIS=$(find "/c/Program Files (x86)" "/c/Program Files" \
+              -maxdepth 4 -iname makensis.exe 2>/dev/null | head -n 1)
+          fi
+          if [ -z "$NSIS" ]; then
+            echo "error: NSIS (makensis) was not found" >&2
+            exit 1
+          fi
+          APP_DIR=$(cygpath -w "$PWD/dist/windows/app")
+          OUTFILE=$(cygpath -w "$PWD/dist/Hotview-${HOTVIEW_VERSION}-x64-setup.exe")
+          ICON_FILE=$(cygpath -w "$PWD/packaging/icons/hotview.ico")
+          LICENSE_FILE=$(cygpath -w "$PWD/LICENSE")
+          "$NSIS" -V2 \
+            -DVERSION="$HOTVIEW_VERSION" \
+            -DAPPDIR="$APP_DIR" \
+            -DOUTFILE="$OUTFILE" \
+            -DICON_FILE="$ICON_FILE" \
+            -DLICENSE_FILE="$LICENSE_FILE" \
+            packaging/windows/installer.nsi
+          ls -lh dist/*.exe
 
       - uses: actions/upload-artifact@v7
         with:
-          name: hotview-windows-x86_64
-          path: hotview-windows-x86_64.zip
+          name: hotview-windows
+          path: |
+            dist/Hotview-*-x64-setup.exe
+            dist/Hotview-*-portable.zip
           if-no-files-found: error

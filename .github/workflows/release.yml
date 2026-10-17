@@ -1,10 +1,19 @@
 name: Release
 
-# One-click release: builds everything (desktop + Android), then publishes a
-# GitHub Release whose tag is `10000 + commit count` and whose title is
-# `v1.{commits/100}.{commits%100}` — both derived from the commit history.
+# One-click release: builds installable desktop packages + the Android APK,
+# then publishes a GitHub Release whose tag is `10000 + commit count` and
+# whose title is `v1.{commits/100}.{commits%100}`.
 on:
   workflow_dispatch:
+    inputs:
+      macos_intel:
+        description: "也构建 Intel (x86_64) macOS DMG（macOS runner 按 10x 计费，可关掉）"
+        type: boolean
+        default: true
+      build_aab:
+        description: "同时构建 Play Store AAB"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,19 +24,23 @@ concurrency:
 
 jobs:
   desktop:
-    name: Build desktop
+    name: Build desktop packages
     uses: ./.github/workflows/desktop.yml
-    secrets: inherit
+    with:
+      macos_intel: ${{ inputs.macos_intel }}
 
   android:
-    name: Build Android
+    name: Build Android APK
     uses: ./.github/workflows/android.yml
+    with:
+      build_aab: ${{ inputs.build_aab }}
     secrets: inherit
 
   release:
     name: Publish release
     needs: [desktop, android]
     runs-on: ubuntu-26.04
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -43,10 +56,12 @@ jobs:
           MINOR=$((COMMITS / 100))
           PATCH=$((COMMITS % 100))
           TITLE="v1.${MINOR}.${PATCH}"
+          VERSION="${TITLE#v}"
           {
             echo "commits=$COMMITS"
             echo "tag=$TAG"
             echo "title=$TITLE"
+            echo "version=$VERSION"
           } >> "$GITHUB_OUTPUT"
           echo "Releasing $TITLE (tag $TAG) from $COMMITS commits"
 
@@ -56,43 +71,65 @@ jobs:
           path: dist
 
       - name: Collect release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p release-assets
           find dist -type f \
-            \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.apk' -o -name '*.aab' \) \
-            ! -name 'app-debug.apk' -print0 |
+            \( -name '*.pkg.tar.zst' -o -name '*.deb' -o -name '*.dmg' \
+               -o -name '*-setup.exe' -o -name '*-portable.zip' \
+               -o -name '*.apk' -o -name '*.aab' \) -print0 |
             while IFS= read -r -d '' file; do
               base=$(basename "$file")
               case "$base" in
-                app-release.apk)  target="hotview-android-release.apk" ;;
-                app-release.aab)  target="hotview-android-release.aab" ;;
-                *)                target="$base" ;;
+                app-release.apk) target="hotview-android-${VERSION}.apk" ;;
+                app-release.aab) target="hotview-android-${VERSION}.aab" ;;
+                *)               target="$base" ;;
               esac
               cp "$file" "release-assets/$target"
             done
-          ls -la release-assets
+          ls -lh release-assets
 
       - name: Create or update the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           TITLE: ${{ steps.version.outputs.title }}
+          VERSION: ${{ steps.version.outputs.version }}
           COMMITS: ${{ steps.version.outputs.commits }}
         run: |
           {
             echo "**$TITLE** · tag \`$TAG\` · built from commit #$COMMITS."
             echo
-            echo "- 桌面端：Linux / macOS (arm64 · x86_64) / Windows，开箱即用"
-            echo "- Android：release APK 与 AAB（CI 使用项目密钥签名）"
-            echo "- 如需自行构建，见 README；两个构建工作流也可单独手动触发"
+            echo "### 桌面端 · 安装包"
             echo
-            echo "Assets 中的 APK 可直接安装；桌面包解压后运行 \`hotview\`。"
+            echo "| 平台 | 文件 | 安装 |"
+            echo "| --- | --- | --- |"
+            echo "| Arch Linux | \`hotview-${VERSION}-1-x86_64.pkg.tar.zst\` | \`sudo pacman -U <file>\` |"
+            echo "| Debian 13 (trixie) amd64 | \`hotview_${VERSION}_amd64.deb\` | \`sudo apt install ./<file>\` |"
+            echo "| Windows x64 | \`Hotview-${VERSION}-x64-setup.exe\` | 双击安装（无需管理员权限） |"
+            echo "| Windows x64（便携） | \`Hotview-${VERSION}-windows-x86_64-portable.zip\` | 解压后运行 |"
+            echo "| macOS Apple Silicon | \`Hotview-${VERSION}-arm64.dmg\` | 拖入「应用程序」 |"
+            if [ "${{ inputs.macos_intel }}" = "true" ]; then
+              echo "| macOS Intel | \`Hotview-${VERSION}-x86_64.dmg\` | 拖入「应用程序」 |"
+            fi
+            echo
+            echo "Arch / Debian 包会由包管理器自动装好运行库（ffmpeg、alsa-lib），装完即可在应用菜单里打开 Hotview。"
+            echo "macOS 包未做 Apple 公证：第一次打开请在「应用程序」中右键 → 打开（详见 DMG 内的 INSTALL.txt）。"
+            echo "Windows 安装包按用户安装，包含完整 FFmpeg DLL 闭包，并注册「打开方式」与卸载项。"
+            echo
+            echo "### Android"
+            echo
+            echo "\`hotview-android-${VERSION}.apk\` 可直接安装。"
+            if [ "${{ inputs.build_aab }}" = "true" ]; then
+              echo "AAB: \`hotview-android-${VERSION}.aab\`。"
+            fi
             echo
             echo "### 最近提交"
             git log --pretty=format:'- %s' -n 20 HEAD
             echo
           } > notes.md
-          head -20 notes.md
+          head -30 notes.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — updating assets"
