@@ -117,14 +117,14 @@ fun AlbumsTab(
         }
 
         item(span = { GridItemSpan(maxLineSpan) }, key = "hero") {
-            RevealOnAppear(index = 0) {
+            RevealOnAppear(index = 0, revealKey = "hero") {
                 HeroCard(state = state, onClick = onOpenAll)
             }
         }
 
         if (state.access == MediaAccess.Denied || state.access == MediaAccess.Partial) {
             item(span = { GridItemSpan(maxLineSpan) }, key = "access") {
-                RevealOnAppear(index = 1) {
+                RevealOnAppear(index = 1, revealKey = "access") {
                     AccessCard(
                         partial = state.access == MediaAccess.Partial,
                         onGrantAccess = onGrantAccess,
@@ -140,7 +140,7 @@ fun AlbumsTab(
             contentType = { "album" },
         ) { album ->
             val index = state.albums.indexOf(album).coerceAtLeast(0)
-            RevealOnAppear(index = index + 2) {
+            RevealOnAppear(index = index + 2, revealKey = "album:${album.id}") {
                 AlbumCard(album = album, onClick = { onOpenAlbum(album) })
             }
         }

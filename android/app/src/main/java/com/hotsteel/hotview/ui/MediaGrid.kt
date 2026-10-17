@@ -125,7 +125,10 @@ fun MediaGrid(
                 key = { _, item -> item.id },
                 contentType = { _, _ -> "cell" },
             ) { _, item ->
-                RevealOnAppear(index = (absoluteIndex[item.id] ?: 0) % 24) {
+                RevealOnAppear(
+                    index = (absoluteIndex[item.id] ?: 0) % 24,
+                    revealKey = "media:${item.id}",
+                ) {
                     val interaction = remember { MutableInteractionSource() }
                     Box(
                         Modifier

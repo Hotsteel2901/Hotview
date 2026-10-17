@@ -1,5 +1,6 @@
 package com.hotsteel.hotview.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -63,6 +64,11 @@ fun MediaThumb(
         return
     }
     val context = LocalContext.current
+    // A thumbnail that is already in memory must be painted at full opacity on
+    // its very first frame. Otherwise every re-entry into the lazy grid (for
+    // example while scrolling back up) replays the blank-to-photo fade and the
+    // tile looks like it was never loaded.
+    val cachedOnEnter = remember(item.uri) { ThumbnailLoader.peek(item.uri) != null }
     val bitmap by produceState<ImageBitmap?>(
         initialValue = ThumbnailLoader.peek(item.uri),
         key1 = item.uri,
@@ -74,12 +80,16 @@ fun MediaThumb(
     Box(modifier) {
         val image = bitmap
         if (image != null) {
-            // Soft crossfade from the shimmer to the picture.
-            var visible by remember(image) { mutableStateOf(false) }
-            LaunchedEffect(image) { visible = true }
+            // Soft crossfade from the shimmer to the picture, but only when the
+            // bitmap actually arrives from the decoder. Cached thumbnails are
+            // visible immediately.
+            var visible by remember(image) { mutableStateOf(cachedOnEnter) }
+            LaunchedEffect(image) {
+                if (!visible) visible = true
+            }
             val alpha by androidx.compose.animation.core.animateFloatAsState(
                 targetValue = if (visible) 1f else 0f,
-                animationSpec = tween(durationMillis = 260),
+                animationSpec = tween(durationMillis = 220),
                 label = "thumbFade",
             )
             Image(
@@ -188,23 +198,68 @@ fun ShimmerBox(modifier: Modifier = Modifier, corner: Dp = 0.dp) {
     }
 }
 
-/** Scale + fade entrance, staggered by [index]. */
+/**
+ * Remembers which tiles already played their entrance during this process.
+ *
+ * The lazy grids dispose the composition of cells that scroll out of view, so
+ * a plain `remember` would replay the blank entrance every time a tile comes
+ * back. This registry lives until the app process exits, which is exactly the
+ * lifetime the gallery asks for.
+ */
+object RevealMemory {
+    private val seen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Returns true when [key] was already revealed before. */
+    fun seenBefore(key: String): Boolean = !seen.add(key)
+}
+
+/**
+ * Entrance animation for grid cells.
+ *
+ * The first time a cell with a [revealKey] is composed it rises from blank
+ * (fade + translate + scale). When that same cell is composed again — scrolling
+ * back up, then down again — it stays fully visible and only does a short,
+ * staggered wobble, so already-loaded thumbnails never look unloaded.
+ */
 @Composable
 fun RevealOnAppear(
     index: Int,
     modifier: Modifier = Modifier,
+    revealKey: Any? = null,
     content: @Composable () -> Unit,
 ) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay((index.coerceAtMost(12) * 45).toLong())
-        visible = true
+    val key = revealKey?.toString()
+    val alreadySeen = remember(key) {
+        key?.let { RevealMemory.seenBefore(it) } ?: false
     }
-    val progress by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.72f, stiffness = 260f),
-        label = "reveal-$index",
-    )
+
+    // First-time cells start at 0 (blank) and spring in. Known cells start at
+    // 1 so they are painted with their full content from the first frame.
+    val reveal = remember(key) { Animatable(if (alreadySeen) 1f else 0f) }
+    val wobble = remember(key) { Animatable(0f) }
+
+    LaunchedEffect(key, alreadySeen) {
+        if (alreadySeen) {
+            // A short, sequenced jiggle: nearby tiles start slightly apart so
+            // the returning grid feels alive instead of flashing.
+            val stagger = ((index % 12) * 18).toLong()
+            if (stagger > 0) delay(stagger)
+            wobble.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 240, easing = LinearEasing),
+            )
+            wobble.snapTo(0f)
+        } else {
+            delay((index.coerceAtMost(12) * 45).toLong())
+            reveal.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 260f),
+            )
+        }
+    }
+
+    val progress = reveal.value
+    val shake = wobble.value
     Box(
         modifier.graphicsLayer {
             alpha = progress
@@ -212,6 +267,14 @@ fun RevealOnAppear(
             val scale = 0.92f + 0.08f * progress
             scaleX = scale
             scaleY = scale
+            if (shake > 0f) {
+                // Damped horizontal wobble, ~4dp, two quick cycles.
+                translationX = kotlin.math.sin(shake * (Math.PI.toFloat() * 4f)) *
+                    (1f - shake) * 4.dp.toPx()
+                val pulse = 1f + kotlin.math.sin(shake * Math.PI.toFloat()) * 0.012f
+                scaleX *= pulse
+                scaleY *= pulse
+            }
         },
     ) {
         content()

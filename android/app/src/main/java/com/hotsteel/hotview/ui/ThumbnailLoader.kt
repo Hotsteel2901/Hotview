@@ -20,7 +20,18 @@ import kotlin.math.max
  * fast path on Android 10+, with a decoder fallback on older releases).
  */
 object ThumbnailLoader {
-    private val cache = object : LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
+    /**
+     * Thumbnails stay resident for the whole app session (until the process
+     * exits): scrolling back and forth must not make an already-seen tile look
+     * blank while it is decoded again. A fixed 48 MB cache ran out after a few
+     * screens on modern devices, so the budget follows the heap instead.
+     */
+    private val cacheBytes: Int = run {
+        val heap = Runtime.getRuntime().maxMemory()
+        (heap / 4).coerceIn(32L * 1024 * 1024, 192L * 1024 * 1024).toInt()
+    }
+
+    private val cache = object : LruCache<String, ImageBitmap>(cacheBytes) {
         override fun sizeOf(key: String, value: ImageBitmap): Int =
             value.width * value.height * 4
     }
