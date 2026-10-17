@@ -11,7 +11,7 @@ apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     xz-utils \
-    libclang-dev \
+    libclang-19-dev \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \

@@ -22,6 +22,11 @@ Unicode true
 !ifndef OUTFILE
     !define OUTFILE "${__FILEDIR__}/../../dist/Hotview-${VERSION}-x64-setup.exe"
 !endif
+; `File /r` is happiest with native separators on Windows. Override this
+; define when smoke-testing the script with makensis on Linux.
+!ifndef APP_GLOB
+    !define APP_GLOB "${APPDIR}\*.*"
+!endif
 
 !define APP_NAME "Hotview"
 !define APP_EXE "hotview.exe"
@@ -110,7 +115,7 @@ Section "Hotview (required)" SEC_MAIN
     Pop $0
 
     SetOutPath "$INSTDIR"
-    File /r "${APPDIR}/*.*"
+    File /r "${APP_GLOB}"
 
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     WriteRegStr HKCU "Software\Hotview" "InstallDir" "$INSTDIR"
