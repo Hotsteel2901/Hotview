@@ -11,6 +11,7 @@ apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     xz-utils \
+    libclang-dev \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
@@ -19,6 +20,13 @@ apt-get install -y --no-install-recommends \
     libasound2-dev \
     libwayland-dev \
     libxkbcommon-dev
+
+# bindgen (used by ffmpeg-sys-next for hwcontext) dlopens libclang.
+libclang_dir=$(find /usr/lib -name 'libclang*.so*' -printf '%h\n' 2>/dev/null |
+    sort -u | head -n 1 || true)
+if [ -n "$libclang_dir" ]; then
+    export LIBCLANG_PATH="$libclang_dir"
+fi
 
 export RUSTUP_HOME=/src/.ci/rustup
 export CARGO_HOME=/src/.ci/cargo

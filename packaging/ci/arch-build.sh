@@ -5,6 +5,7 @@ set -eu
 
 pacman -Syu --noconfirm --needed \
     rust \
+    clang \
     ffmpeg \
     alsa-lib \
     pkgconf \
