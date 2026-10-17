@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.hotsteel.Hotview</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Hotview</name>
+  <summary>Fast image and video viewer with GPU rendering</summary>
+  <summary xml:lang="zh_CN">GPU 渲染的快速图片 / 视频查看器</summary>
+  <summary xml:lang="ja">GPU レンダリングの高速画像・動画ビューア</summary>
+  <summary xml:lang="de">Schneller Bild- und Videobetrachter mit GPU-Rendering</summary>
+  <summary xml:lang="ru">Быстрый просмотр изображений и видео с GPU-рендерингом</summary>
+  <description>
+    <p>
+      Hotview is a photo and video viewer built on a Rust core: wgpu handles the
+      GPU pipeline while FFmpeg decodes every common media format. Browse a
+      folder as a lazy thumbnail grid, open a picture or video, zoom, rotate,
+      flip and play animated GIF / WebP files.
+    </p>
+    <p xml:lang="zh_CN">
+      Hotview 是一个基于 Rust 内核的照片 / 视频查看器：wgpu 负责 GPU 渲染管线，
+      FFmpeg 解码常见媒体格式。文件夹以惰性缩略图网格浏览，支持缩放、旋转、翻转，
+      以及 GIF / 动画 WebP 的播放。
+    </p>
+  </description>
+  <launchable type="desktop-id">hotview.desktop</launchable>
+  <provides>
+    <binary>hotview</binary>
+  </provides>
+  <url type="homepage">https://github.com/Hotsteel2901/Hotview</url>
+  <url type="bugtracker">https://github.com/Hotsteel2901/Hotview/issues</url>
+  <developer id="com.hotsteel">
+    <name>Hotsteel</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>Graphics</category>
+  </categories>
+  <keywords>
+    <keyword>image</keyword>
+    <keyword>photo</keyword>
+    <keyword>video</keyword>
+    <keyword>viewer</keyword>
+    <keyword>gallery</keyword>
+  </keywords>
+</component>

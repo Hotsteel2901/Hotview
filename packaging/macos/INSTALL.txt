@@ -1,0 +1,19 @@
+First launch / 首次打开
+=======================
+
+macOS may block apps that are not notarized by Apple.
+
+1. Open the DMG and drag "Hotview" into the "Applications" folder.
+2. In Applications, right-click (or Control-click) Hotview and choose "Open".
+3. Confirm "Open" in the dialog. This is only needed the first time.
+
+If macOS still refuses, open System Settings -> Privacy & Security and click
+"Open Anyway" next to Hotview.
+
+macOS 可能拦截未经过 Apple 公证的应用：
+
+1. 打开 DMG，把 "Hotview" 拖进 "应用程序" 文件夹。
+2. 在"应用程序"里右键（或 Control + 点击）Hotview，选择"打开"。
+3. 在弹窗里确认"打开"。只需第一次这样做。
+
+如果系统仍然拦截，打开 系统设置 → 隐私与安全性，在 Hotview 旁边点"仍要打开"。

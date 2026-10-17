@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Hotview
+GenericName=Image & Video Viewer
+Comment=Fast image and video viewer with GPU rendering
+Comment[zh_CN]=GPU 渲染的快速图片 / 视频查看器
+Comment[ja]=GPU レンダリングの高速画像・動画ビューア
+Comment[de]=Schneller Bild- und Videobetrachter mit GPU-Rendering
+Comment[ru]=Быстрый просмотр изображений и видео с GPU-рендерингом
+Exec=hotview %F
+TryExec=hotview
+Icon=hotview
+Terminal=false
+StartupNotify=true
+StartupWMClass=hotview
+Categories=Graphics;Viewer;Photography;
+Keywords=image;photo;video;viewer;gallery;slideshow;
+Keywords[zh_CN]=图片;照片;视频;查看器;相册;幻灯片;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/avif;image/heic;image/heif;image/tiff;image/bmp;image/x-icon;image/x-xcf;image/qoi;image/x-exr;image/x-portable-pixmap;image/x-tga;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;video/x-ms-wmv;video/x-flv;video/3gpp;
+X-GNOME-UsesNotifications=false

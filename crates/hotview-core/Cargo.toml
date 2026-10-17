@@ -27,7 +27,15 @@ log = "0.4"
 rayon = "1.12"
 thiserror = "2"
 
-ffmpeg-next = { version = "9.0", optional = true }
+# Only decoding, format, audio resampling and scaling are used (no avfilter
+# or avdevice). Keeping those default features off trims the runtime
+# dependency closure of every desktop package considerably.
+ffmpeg-next = { version = "9.0", optional = true, default-features = false, features = [
+    "codec",
+    "format",
+    "software-resampling",
+    "software-scaling",
+] }
 # The `media`/`audio`/`nativewindow` features add -lmediandk, -laaudio and
 # -lnativewindow to the link line. Without them the .so keeps undefined
 # AMedia*/AAudio* symbols and fails to dlopen at runtime.
